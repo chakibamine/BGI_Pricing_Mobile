@@ -91,7 +91,7 @@ Future<void> _render(WidgetTester tester, Widget icon, String path) async {
 void main() {
   testWidgets('generate launcher icons', (tester) async {
     final loader = FontLoader('OpenSansBold')
-      ..addFont(rootBundle.load('assets/fonts/OpenSans-Bold.ttf'));
+      ..addFont(rootBundle.load('assets/fonts/Inter-Bold.ttf'));
     await loader.load();
     tester.view.physicalSize = const Size(1024, 1024);
     tester.view.devicePixelRatio = 1;

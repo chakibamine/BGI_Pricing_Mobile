@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
 import '../../core/auth.dart';
+import '../../core/charts.dart';
 import '../../core/format.dart';
 import '../../core/quinzaine.dart';
 import '../../core/theme.dart';
@@ -17,6 +18,8 @@ final _ratesProvider = FutureProvider.autoDispose
       .get('/exchange-rates', query: {'dateFrom': k.from, 'dateTo': k.to});
   return (res as List).map((e) => ExchangeRate.fromJson(e as Json)).toList();
 });
+
+typedef _Filters = ({String from, String to, String source});
 
 class TauxScreen extends ConsumerStatefulWidget {
   const TauxScreen({super.key});
@@ -36,6 +39,8 @@ class _TauxScreenState extends ConsumerState<TauxScreen> {
 
   ({String from, String to}) get _key => (from: _from, to: _to);
 
+  int get _filterCount => [_from, _to, _source].where((v) => v.isNotEmpty).length;
+
   void _update(VoidCallback change) => setState(() {
         change();
         _shown = _pageSize;
@@ -48,100 +53,91 @@ class _TauxScreenState extends ConsumerState<TauxScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final isAdmin = ref.watch(isAdminProvider);
     final rates = ref.watch(_ratesProvider(_key));
     final data = rates.value ?? const <ExchangeRate>[];
-    final sources = {...data.map((r) => r.source)}.toList()..sort();
-    final hasFilters = _from.isNotEmpty || _to.isNotEmpty || _source.isNotEmpty;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Taux USD/MAD'),
-        actions: [
-          if (isAdmin)
-            PopupMenuButton<String>(
-              enabled: !_busy,
-              icon: _busy
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Icon(Icons.more_vert),
-              onSelected: (v) => v == 'fetch' ? _fetchToday() : _backfill(),
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'fetch', child: Text('Récupérer Bank Al-Maghrib (BDT)')),
-                PopupMenuItem(value: 'backfill', child: Text('Backfill BDT')),
-              ],
-            ),
-        ],
-      ),
+    return PageScaffold(
+      title: 'Taux USD/MAD',
+      actions: [
+        if (isAdmin)
+          ActionMenu<String>(
+            busy: _busy,
+            onSelected: (v) => v == 'fetch' ? _fetchToday() : _backfill(),
+            items: [
+              menuItem('fetch', Icons.cloud_download_outlined, 'Récupérer Bank Al-Maghrib (BDT)'),
+              menuItem('backfill', Icons.history_toggle_off_rounded, 'Backfill BDT'),
+            ],
+          ),
+      ],
       floatingActionButton: isAdmin
-          ? FloatingActionButton(
+          ? FloatingActionButton.extended(
               onPressed: _upsert,
-              backgroundColor: AppColors.amber,
-              foregroundColor: Colors.white,
-              child: const Icon(Icons.add),
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Taux'),
             )
           : null,
-      body: RefreshIndicator(
-        onRefresh: () async {
-          _refreshData();
-          await ref.read(_ratesProvider(_key).future);
-        },
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
-          children: [
-            Panel(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DateField(label: 'Du', value: _from, onChanged: (v) => _update(() => _from = v)),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: DateField(label: 'Au', value: _to, onChanged: (v) => _update(() => _to = v)),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  LabeledDropdown<String>(
-                    key: ValueKey('src-${sources.join()}'),
-                    label: 'Source',
-                    value: sources.contains(_source) ? _source : '',
-                    items: {'': 'Toutes', for (final s in sources) s: s},
-                    onChanged: (v) => _update(() => _source = v),
-                  ),
-                  if (hasFilters)
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton(
-                        onPressed: () => _update(() => _from = _to = _source = ''),
-                        child: const Text('Réinitialiser'),
-                      ),
-                    ),
-                ],
-              ),
+      onRefresh: () async {
+        _refreshData();
+        await ref.read(_ratesProvider(_key).future);
+      },
+      filterBar: Row(
+        children: [
+          Expanded(
+            child: Text(
+              _from.isEmpty && _to.isEmpty
+                  ? 'Toutes les dates'
+                  : '${_from.isEmpty ? '…' : formatDate(_from)} → ${_to.isEmpty ? '…' : formatDate(_to)}',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: p.textMuted, fontWeight: FontWeight.w500),
             ),
-            const SizedBox(height: 12),
-            AsyncView(
-              value: rates,
-              onRetry: () => ref.invalidate(_ratesProvider(_key)),
-              builder: (data) => _list(data, isAdmin, hasFilters),
+          ),
+          Badge(
+            isLabelVisible: _filterCount > 0,
+            label: Text('$_filterCount'),
+            backgroundColor: p.accent,
+            child: OutlinedButton.icon(
+              onPressed: () => _openFilters(data),
+              icon: const Icon(Icons.tune_rounded, size: 18),
+              label: const Text('Filtres'),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
+      children: [
+        AsyncView(
+          value: rates,
+          onRetry: () => ref.invalidate(_ratesProvider(_key)),
+          builder: (data) => _list(data, isAdmin),
+        ),
+      ],
     );
   }
 
-  Widget _list(List<ExchangeRate> data, bool isAdmin, bool hasFilters) {
+  Future<void> _openFilters(List<ExchangeRate> data) async {
+    final sources = {...data.map((r) => r.source)}.toList()..sort();
+    final result = await showFormSheet<_Filters>(
+      context,
+      title: 'Filtres',
+      builder: (_) => _FiltersForm(initial: (from: _from, to: _to, source: _source), sources: sources),
+    );
+    if (result == null) return;
+    _update(() {
+      _from = result.from;
+      _to = result.to;
+      _source = result.source;
+    });
+  }
+
+  Widget _list(List<ExchangeRate> data, bool isAdmin) {
+    final p = context.palette;
     final filtered = _source.isEmpty ? data : data.where((r) => r.source == _source).toList();
     if (filtered.isEmpty) {
-      return EmptyState(hasFilters ? 'Aucun taux pour ces filtres' : 'Aucun taux');
+      return EmptyState(
+        _filterCount > 0 ? 'Aucun taux pour ces filtres' : 'Aucun taux',
+        icon: Icons.currency_exchange_rounded,
+      );
     }
     final stats = <String, ({int count, double sum})>{};
     for (final r in filtered) {
@@ -150,10 +146,49 @@ class _TauxScreenState extends ConsumerState<TauxScreen> {
       stats[key] = (count: s.count + 1, sum: s.sum + r.usdMadRate);
     }
     final page = filtered.take(_shown).toList();
+    final chronological = [...filtered]..sort((a, b) => a.rateDate.compareTo(b.rateDate));
+    final recent = chronological.length > 60 ? chronological.sublist(chronological.length - 60) : chronological;
+    final latest = chronological.last;
+    final average = filtered.fold<double>(0, (s, r) => s + r.usdMadRate) / filtered.length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        KpiGrid(children: [
+          KpiCard(
+            label: 'Dernier taux',
+            value: formatValue(latest.usdMadRate),
+            sub: '${formatDate(latest.rateDate)} · MAD/USD',
+            icon: Icons.currency_exchange_rounded,
+            accent: true,
+          ),
+          KpiCard(
+            label: 'Moyenne',
+            value: formatValue(average),
+            sub: '${filtered.length} taux',
+            icon: Icons.functions_rounded,
+          ),
+        ]),
+        if (recent.length > 1)
+          Panel(
+            title: 'Tendance',
+            subtitle: recent.length < chronological.length ? '60 derniers taux' : null,
+            icon: Icons.show_chart_rounded,
+            child: SeriesChart(
+              height: 180,
+              labels: [for (final r in recent) formatDate(r.rateDate)],
+              series: [
+                ChartSeries(
+                  name: 'USD/MAD',
+                  values: [for (final r in recent) r.usdMadRate],
+                  color: p.seriesAt(1),
+                  area: true,
+                  dots: false,
+                  digits: valueDigits,
+                ),
+              ],
+            ),
+          ),
         for (final item in withQuinzaineHeaders(page, (r) => r.rateDate))
           switch (item) {
             GroupHeader(:final quinzaine) => QuinzaineHeaderTile(
@@ -164,26 +199,30 @@ class _TauxScreenState extends ConsumerState<TauxScreen> {
                     '${s.count} taux · Moyenne ${formatValue(s.sum / s.count)}',
                 ],
               ),
-            GroupItem(:final row) => Card(
-                margin: const EdgeInsets.only(bottom: 6),
-                child: ListTile(
-                  dense: true,
-                  title: Text(formatDate(row.rateDate), style: const TextStyle(fontWeight: FontWeight.w700)),
-                  subtitle: Text(row.source),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        formatValue(row.usdMadRate),
-                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+            GroupItem(:final row) => ListCard(
+                leading: IconBubble(Icons.attach_money_rounded, color: p.seriesAt(1), size: 40),
+                title: Text(formatDate(row.rateDate)),
+                subtitle: Text(row.source),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      formatValue(row.usdMadRate),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                        color: p.textPrimary,
+                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
-                      if (isAdmin)
-                        IconButton(
-                          icon: const Icon(Icons.delete_outline, color: AppColors.red),
-                          onPressed: () => _delete(row),
-                        ),
-                    ],
-                  ),
+                    ),
+                    if (isAdmin)
+                      IconButton(
+                        icon: Icon(Icons.delete_outline_rounded, color: p.danger),
+                        onPressed: () => _delete(row),
+                      )
+                    else
+                      const SizedBox(width: 10),
+                  ],
                 ),
               ),
           },
@@ -325,11 +364,10 @@ class _RangeFormState extends State<_RangeForm> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
+        const InfoBanner(
           'Maximum 100 jours calendaires. Un seul backfill à la fois.',
-          style: TextStyle(color: AppColors.muted),
+          kind: BannerKind.info,
         ),
-        const SizedBox(height: 12),
         DateField(label: 'Du', value: _from, onChanged: (v) => setState(() => _from = v)),
         const SizedBox(height: 12),
         DateField(label: 'Au', value: _to, onChanged: (v) => setState(() => _to = v)),
@@ -339,6 +377,64 @@ class _RangeFormState extends State<_RangeForm> {
               ? null
               : () => Navigator.pop(context, {'dateFrom': _from, 'dateTo': _to}),
           child: const Text('Lancer'),
+        ),
+      ],
+    );
+  }
+}
+
+class _FiltersForm extends StatefulWidget {
+  const _FiltersForm({required this.initial, required this.sources});
+
+  final _Filters initial;
+  final List<String> sources;
+
+  @override
+  State<_FiltersForm> createState() => _FiltersFormState();
+}
+
+class _FiltersFormState extends State<_FiltersForm> {
+  late String _from = widget.initial.from;
+  late String _to = widget.initial.to;
+  late String _source = widget.sources.contains(widget.initial.source) ? widget.initial.source : '';
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(child: DateField(label: 'Du', value: _from, onChanged: (v) => setState(() => _from = v))),
+            const SizedBox(width: 10),
+            Expanded(child: DateField(label: 'Au', value: _to, onChanged: (v) => setState(() => _to = v))),
+          ],
+        ),
+        const SizedBox(height: 12),
+        LabeledDropdown<String>(
+          label: 'Source',
+          icon: Icons.source_outlined,
+          value: _source,
+          items: {'': 'Toutes', for (final s in widget.sources) s: s},
+          onChanged: (v) => setState(() => _source = v),
+        ),
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => Navigator.pop(context, (from: '', to: '', source: '')),
+                child: const Text('Réinitialiser'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: FilledButton(
+                onPressed: () => Navigator.pop(context, (from: _from, to: _to, source: _source)),
+                child: const Text('Appliquer'),
+              ),
+            ),
+          ],
         ),
       ],
     );

@@ -17,11 +17,11 @@ const _kindLabels = {
   'error': 'Erreur',
 };
 
-Color _kindColor(String kind) => switch (kind) {
-      'new' => AppColors.green,
-      'changed' => AppColors.amber,
-      'error' => AppColors.red,
-      _ => AppColors.muted,
+Color _kindColor(AppPalette p, String kind) => switch (kind) {
+      'new' => p.success,
+      'changed' => p.warning,
+      'error' => p.danger,
+      _ => p.textMuted,
     };
 
 Future<PlatformFile?> _pickSpreadsheet(BuildContext context) async {
@@ -43,19 +43,13 @@ class ImportScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Import')),
-      body: ListView(
-        padding: const EdgeInsets.all(12),
-        children: const [
-          _QuotationsImport(),
-          SizedBox(height: 12),
-          _RatesImport(),
-          SizedBox(height: 12),
-          _BkamPanel(),
-          SizedBox(height: 24),
-        ],
-      ),
+    return const PageScaffold(
+      title: 'Import',
+      children: [
+        _QuotationsImport(),
+        _RatesImport(),
+        _BkamPanel(),
+      ],
     );
   }
 }
@@ -67,22 +61,35 @@ class _ReportBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
+    Widget stat(String label, int value, Color color) => Expanded(
+          child: Column(
+            children: [
+              Text('$value', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: color)),
+              Text(label, style: TextStyle(fontSize: 11.5, color: p.textMuted)),
+            ],
+          ),
+        );
     return Container(
       margin: const EdgeInsets.only(top: 12),
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.steel,
-        borderRadius: BorderRadius.circular(8),
+        color: p.surfaceAlt,
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Insérés : ${report.inserted} — Mis à jour : ${report.updated} — Ignorés : ${report.skipped}',
-            style: const TextStyle(fontWeight: FontWeight.w600),
+          Row(
+            children: [
+              stat('Insérés', report.inserted, p.success),
+              stat('Mis à jour', report.updated, p.info),
+              stat('Ignorés', report.skipped, p.textMuted),
+            ],
           ),
+          if (report.errors.isNotEmpty) const SizedBox(height: 8),
           for (final e in report.errors)
-            Text('• $e', style: const TextStyle(fontSize: 12, color: AppColors.red)),
+            Text('• $e', style: TextStyle(fontSize: 12, color: p.danger)),
         ],
       ),
     );
@@ -132,11 +139,11 @@ class _QuotationsImportState extends ConsumerState<_QuotationsImport> {
   Widget build(BuildContext context) {
     return Panel(
       title: 'Cotations CIF NWE',
+      subtitle: 'Colonnes : Date | Valeur CIF NWE',
+      icon: Icons.insights_rounded,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('Colonnes : Date | Valeur CIF NWE', style: TextStyle(color: AppColors.muted)),
-          const SizedBox(height: 10),
           ProductSelector(value: _product, onChanged: (p) => setState(() => _product = p)),
           const SizedBox(height: 10),
           _FileRow(
@@ -201,14 +208,11 @@ class _RatesImportState extends ConsumerState<_RatesImport> {
   Widget build(BuildContext context) {
     return Panel(
       title: 'Taux de change',
+      subtitle: '2 colonnes (Date, Taux) ou 3 colonnes (Date, Devise, Taux)',
+      icon: Icons.currency_exchange_rounded,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
-            '2 colonnes (Date, Taux) ou 3 colonnes (Date, Devise, Taux)',
-            style: TextStyle(color: AppColors.muted),
-          ),
-          const SizedBox(height: 10),
           _FileRow(
             file: _file,
             onPick: () async {
@@ -216,10 +220,11 @@ class _RatesImportState extends ConsumerState<_RatesImport> {
               if (f != null) setState(() => _file = f);
             },
           ),
-          const SizedBox(height: 10),
-          FilledButton(
+          const SizedBox(height: 12),
+          FilledButton.icon(
             onPressed: _busy ? null : _submit,
-            child: Text(_busy ? 'Import…' : 'Importer'),
+            icon: const Icon(Icons.cloud_upload_outlined),
+            label: Text(_busy ? 'Import…' : 'Importer'),
           ),
           if (_report != null) _ReportBlock(_report!),
         ],
@@ -236,12 +241,38 @@ class _FileRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      onPressed: onPick,
-      icon: const Icon(Icons.attach_file),
-      label: Text(
-        file?.name ?? 'Choisir un fichier (.xlsx / .csv)',
-        overflow: TextOverflow.ellipsis,
+    final p = context.palette;
+    final picked = file != null;
+    return InkWell(
+      onTap: onPick,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: picked ? p.tint(p.success) : p.surfaceAlt,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: picked ? p.success.withValues(alpha: 0.5) : p.border),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              picked ? Icons.description_rounded : Icons.upload_file_rounded,
+              color: picked ? p.success : p.textMuted,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                file?.name ?? 'Choisir un fichier (.xlsx / .csv)',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontWeight: picked ? FontWeight.w600 : FontWeight.w400,
+                  color: picked ? p.textPrimary : p.textMuted,
+                ),
+              ),
+            ),
+            if (picked) Icon(Icons.swap_horiz_rounded, size: 18, color: p.textMuted),
+          ],
+        ),
       ),
     );
   }
@@ -338,16 +369,17 @@ class _BkamPanelState extends ConsumerState<_BkamPanel> {
     }
 
     return Panel(
-      title: 'Récupération Bank Al-Maghrib (USD/MAD)',
+      title: 'Bank Al-Maghrib',
+      subtitle: 'Récupération des taux USD/MAD',
+      icon: Icons.account_balance_rounded,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
+          const InfoBanner(
             'Maximum 100 jours calendaires. Les week-ends sont ignorés. '
             'Rien n’est enregistré avant validation de l’aperçu.',
-            style: TextStyle(color: AppColors.muted),
+            kind: BannerKind.info,
           ),
-          const SizedBox(height: 10),
           Row(
             children: [
               Expanded(child: DateField(label: 'Du', value: _from, onChanged: (v) => setState(() => _from = v))),
@@ -420,7 +452,7 @@ class _BkamPanelState extends ConsumerState<_BkamPanel> {
                   children: [
                     Text(formatDate(r.date), style: const TextStyle(fontWeight: FontWeight.w600)),
                     const Spacer(),
-                    StatusChip(_kindLabels[r.kind]!, color: _kindColor(r.kind)),
+                    StatusChip(_kindLabels[r.kind]!, color: _kindColor(context.palette, r.kind)),
                   ],
                 ),
                 subtitle: Text(

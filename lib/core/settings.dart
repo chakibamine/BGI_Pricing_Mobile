@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -31,6 +32,25 @@ class ApiUrlNotifier extends Notifier<String> {
 
 final apiUrlProvider = NotifierProvider<ApiUrlNotifier, String>(
   ApiUrlNotifier.new,
+);
+
+const _themeModeKey = 'theme_mode';
+
+class ThemeModeNotifier extends Notifier<ThemeMode> {
+  @override
+  ThemeMode build() {
+    final saved = ref.read(sharedPreferencesProvider).getString(_themeModeKey);
+    return ThemeMode.values.firstWhere((m) => m.name == saved, orElse: () => ThemeMode.system);
+  }
+
+  Future<void> set(ThemeMode mode) async {
+    state = mode;
+    await ref.read(sharedPreferencesProvider).setString(_themeModeKey, mode.name);
+  }
+}
+
+final themeModeProvider = NotifierProvider<ThemeModeNotifier, ThemeMode>(
+  ThemeModeNotifier.new,
 );
 
 String envLabelFor(String url) {

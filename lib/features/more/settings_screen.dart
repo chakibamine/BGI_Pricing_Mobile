@@ -70,79 +70,77 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final current = ref.watch(apiUrlProvider);
-    return Scaffold(
-      appBar: AppBar(title: const Text('Serveur')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Panel(
-            title: 'Adresse de l’API',
-            trailing: StatusChip(
-              envLabelFor(current),
-              color: current == defaultApiUrl
-                  ? AppColors.green
-                  : AppColors.amber,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: _url,
-                  keyboardType: TextInputType.url,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'URL',
-                    hintText: 'http://10.10.2.10:3000',
-                  ),
+    return PageScaffold(
+      title: 'Serveur',
+      children: [
+        Panel(
+          title: 'Adresse de l’API',
+          subtitle: current,
+          icon: Icons.dns_rounded,
+          trailing: StatusChip(
+            envLabelFor(current),
+            color: current == defaultApiUrl ? p.success : p.warning,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _url,
+                keyboardType: TextInputType.url,
+                autocorrect: false,
+                decoration: const InputDecoration(
+                  labelText: 'URL',
+                  hintText: 'http://10.10.2.10:3000',
+                  prefixIcon: Icon(Icons.link_rounded),
                 ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    for (final e in apiUrlPresets.entries)
-                      ActionChip(
-                        label: Text(e.key),
-                        onPressed: () => setState(() => _url.text = e.value),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                if (_result != null) ...[
-                  InfoBanner(
-                    _result!,
-                    color: _ok ? AppColors.green : AppColors.red,
-                  ),
-                  const SizedBox(height: 12),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  for (final e in apiUrlPresets.entries)
+                    ActionChip(
+                      avatar: const Icon(Icons.bolt_rounded, size: 16),
+                      label: Text(e.key),
+                      onPressed: () => setState(() => _url.text = e.value),
+                    ),
                 ],
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: _testing ? null : _test,
-                        child: Text(_testing ? 'Test…' : 'Tester'),
-                      ),
+              ),
+              const SizedBox(height: 14),
+              if (_result != null)
+                InfoBanner(_result!, kind: _ok ? BannerKind.success : BannerKind.error),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _testing ? null : _test,
+                      icon: _testing
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.network_check_rounded, size: 18),
+                      label: Text(_testing ? 'Test…' : 'Tester'),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: _save,
-                        child: const Text('Enregistrer'),
-                      ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _save,
+                      child: const Text('Enregistrer'),
                     ),
-                  ],
-                ),
-              ],
-            ),
+                  ),
+                ],
+              ),
+            ],
           ),
-          const SizedBox(height: 16),
-          const Text(
-            'L’application accède à l’API de production via le VPN de '
-            'l’entreprise. Connectez le VPN avant d’ouvrir l’application.',
-            style: TextStyle(color: AppColors.muted, fontSize: 13),
-          ),
-        ],
-      ),
+        ),
+        const InfoBanner(
+          'L’application accède à l’API de production via le VPN de '
+          'l’entreprise. Connectez le VPN avant d’ouvrir l’application.',
+          kind: BannerKind.info,
+        ),
+      ],
     );
   }
 }

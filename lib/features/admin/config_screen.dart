@@ -29,38 +29,38 @@ class _ConfigScreenState extends ConsumerState<ConfigScreen> {
   @override
   Widget build(BuildContext context) {
     final configs = ref.watch(productConfigsProvider(_product));
-    return Scaffold(
-      appBar: AppBar(title: const Text('Configurations')),
+    return PageScaffold(
+      title: 'Configurations',
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _create,
-        backgroundColor: AppColors.amber,
-        foregroundColor: Colors.white,
-        icon: const Icon(Icons.add),
+        icon: const Icon(Icons.add_rounded),
         label: const Text('Nouvelle config'),
       ),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          ref.invalidate(productConfigsProvider);
-          await ref.read(productConfigsProvider(_product).future);
-        },
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
-          children: [
-            LabeledDropdown<Product?>(
-              label: 'Produit',
-              value: _product,
-              items: const {null: 'Tous', Product.gasoil: 'Gasoil', Product.ssp: 'SSP'},
-              onChanged: (p) => setState(() => _product = p),
+      onRefresh: () async {
+        ref.invalidate(productConfigsProvider);
+        await ref.read(productConfigsProvider(_product).future);
+      },
+      filterBar: Row(
+        children: [
+          for (final e in const {null: 'Tous', Product.gasoil: 'Gasoil', Product.ssp: 'SSP'}.entries)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: ChoiceChip(
+                label: Text(e.value),
+                selected: _product == e.key,
+                showCheckmark: false,
+                onSelected: (_) => setState(() => _product = e.key),
+              ),
             ),
-            const SizedBox(height: 12),
-            AsyncView(
-              value: configs,
-              onRetry: () => ref.invalidate(productConfigsProvider(_product)),
-              builder: _content,
-            ),
-          ],
-        ),
+        ],
       ),
+      children: [
+        AsyncView(
+          value: configs,
+          onRetry: () => ref.invalidate(productConfigsProvider(_product)),
+          builder: _content,
+        ),
+      ],
     );
   }
 
@@ -78,13 +78,16 @@ class _ConfigScreenState extends ConsumerState<ConfigScreen> {
       children: [
         Panel(
           title: 'Tendance Platts',
+          subtitle: 'Configuration par défaut de chaque produit',
+          icon: Icons.star_rounded,
           child: defaults.isEmpty
-              ? const EmptyState('Aucune configuration par défaut')
+              ? const EmptyState('Aucune configuration par défaut', icon: Icons.tune_rounded)
               : Column(children: [for (final c in defaults) _card(c)]),
         ),
-        const SizedBox(height: 12),
         Panel(
           title: 'Autres configurations',
+          subtitle: 'Appliquées sur une période',
+          icon: Icons.layers_outlined,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -97,11 +100,12 @@ class _ConfigScreenState extends ConsumerState<ConfigScreen> {
                 selected: {_history},
                 onSelectionChanged: (s) => setState(() => _history = s.first),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
               if (shown.isEmpty)
-                EmptyState(_history
-                    ? 'Aucune configuration dans l’historique'
-                    : 'Aucune configuration en cours')
+                EmptyState(
+                  _history ? 'Aucune configuration dans l’historique' : 'Aucune configuration en cours',
+                  icon: _history ? Icons.history_rounded : Icons.layers_clear_outlined,
+                )
               else
                 for (final c in shown) _card(c),
             ],
@@ -112,64 +116,86 @@ class _ConfigScreenState extends ConsumerState<ConfigScreen> {
   }
 
   Widget _card(ProductConfig c) {
-    Widget param(String label, String value) => Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label, style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
-            Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
-          ],
+    final p = context.palette;
+    Widget param(String label, String value) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            color: p.surface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: p.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: TextStyle(fontSize: 10.5, color: p.textMuted)),
+              const SizedBox(height: 1),
+              Text(
+                value,
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: p.textPrimary,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+          ),
         );
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.fromLTRB(12, 8, 4, 10),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(12, 10, 4, 12),
       decoration: BoxDecoration(
-        border: Border.all(color: AppColors.border),
-        borderRadius: BorderRadius.circular(10),
+        color: p.surfaceAlt,
+        borderRadius: BorderRadius.circular(14),
+        border: c.isDefault ? Border.all(color: p.accent.withValues(alpha: 0.5)) : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              Expanded(
-                child: Text(c.name, style: const TextStyle(fontWeight: FontWeight.w800)),
+              IconBubble(
+                c.isDefault ? Icons.star_rounded : Icons.layers_outlined,
+                color: c.isDefault ? p.accent : p.info,
+                size: 34,
               ),
-              Text(c.product.code, style: const TextStyle(color: AppColors.muted)),
-              const SizedBox(width: 6),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(c.name, style: TextStyle(fontWeight: FontWeight.w700, color: p.textPrimary)),
+                    Text(
+                      c.isDefault
+                          ? '${c.product.code} · par défaut'
+                          : '${c.product.code} · ${c.validFrom != null && c.validUntil != null ? '${formatDate(c.validFrom)} → ${formatDate(c.validUntil)}' : '—'}',
+                      style: TextStyle(fontSize: 12, color: p.textMuted),
+                    ),
+                  ],
+                ),
+              ),
               if (!c.isDefault)
-                StatusChip(c.isActive ? 'Actif' : 'Inactif',
-                    color: c.isActive ? AppColors.green : AppColors.muted),
+                StatusChip(c.isActive ? 'Actif' : 'Inactif', color: c.isActive ? p.success : p.textMuted),
               PopupMenuButton<String>(
+                icon: Icon(Icons.more_vert_rounded, color: p.textMuted),
                 onSelected: (v) => _action(v, c),
                 itemBuilder: (_) => [
-                  const PopupMenuItem(value: 'edit', child: Text('Modifier')),
-                  if (!c.isDefault && c.isActive)
-                    const PopupMenuItem(value: 'default', child: Text('Définir par défaut')),
+                  menuItem('edit', Icons.edit_outlined, 'Modifier'),
+                  if (!c.isDefault && c.isActive) menuItem('default', Icons.star_outline_rounded, 'Définir par défaut'),
                   if (!c.isDefault)
-                    PopupMenuItem(
-                      value: c.isActive ? 'deactivate' : 'reactivate',
-                      child: Text(c.isActive ? 'Désactiver' : 'Réactiver'),
+                    menuItem(
+                      c.isActive ? 'deactivate' : 'reactivate',
+                      c.isActive ? Icons.pause_circle_outline_rounded : Icons.play_circle_outline_rounded,
+                      c.isActive ? 'Désactiver' : 'Réactiver',
                     ),
-                  if (!c.isDefault)
-                    const PopupMenuItem(
-                      value: 'delete',
-                      child: Text('Supprimer', style: TextStyle(color: AppColors.red)),
-                    ),
+                  if (!c.isDefault) menuItem('delete', Icons.delete_outline_rounded, 'Supprimer', danger: true),
                 ],
               ),
             ],
           ),
-          if (!c.isDefault)
-            Text(
-              c.validFrom != null && c.validUntil != null
-                  ? '${formatDate(c.validFrom)} → ${formatDate(c.validUntil)}'
-                  : '—',
-              style: const TextStyle(fontSize: 12, color: AppColors.muted),
-            ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Wrap(
-            spacing: 18,
+            spacing: 8,
             runSpacing: 8,
             children: [
               param(r'Premium ($/T)', formatValue(c.premium)),
@@ -181,7 +207,7 @@ class _ConfigScreenState extends ConsumerState<ConfigScreen> {
           ),
           if (c.note?.isNotEmpty ?? false) ...[
             const SizedBox(height: 6),
-            Text(c.note!, style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic)),
+            Text(c.note!, style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: p.textMuted)),
           ],
         ],
       ),
@@ -365,9 +391,8 @@ class _ConfigFormState extends State<_ConfigForm> {
                     'Les quinzaines de la période choisie seront calculées avec cette config '
                     'en plus de la config par défaut.'
                 : 'Aucune config par défaut pour ce produit — celle-ci le deviendra.',
-            color: AppColors.navy,
+            kind: BannerKind.info,
           ),
-          const SizedBox(height: 12),
         ],
         TextField(
           controller: _name,

@@ -13,10 +13,10 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/providers.dart';
 import '../../models/models.dart';
+import '../auth/splash_screen.dart';
 
 class _BreakdownRow {
-  const _BreakdownRow(this.label, this.value, this.digits, this.unit,
-      {this.strong = false});
+  const _BreakdownRow(this.label, this.value, this.digits, this.unit, {this.strong = false});
   final String Function(Calculation c) label;
   final double Function(Calculation c) value;
   final int digits;
@@ -52,21 +52,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   int _year = DateTime.now().year;
   ({int month, int period})? _selected;
   bool _busy = false;
-
-  final _comparisonKey = GlobalKey();
-  final _evolutionKey = GlobalKey();
-  final _plattsKey = GlobalKey();
+  _DashboardView? _lastView;
 
   ({Product product, int year}) get _dashKey => (product: _product, year: _year);
 
   QuinzaineKey? get _quinzaineKey => _selected == null
       ? null
-      : (
-          product: _product,
-          year: _year,
-          month: _selected!.month,
-          period: _selected!.period,
-        );
+      : (product: _product, year: _year, month: _selected!.month, period: _selected!.period);
 
   void _reset(VoidCallback change) => setState(() {
         change();
@@ -88,104 +80,68 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       });
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Tableau de bord'),
-        actions: [
-          if (isAdmin)
-            PopupMenuButton<String>(
-              enabled: !_busy && dash.hasValue,
-              icon: _busy
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Icon(Icons.more_vert),
-              onSelected: (v) {
-                switch (v) {
-                  case 'xlsx':
-                    _exportExcel();
-                  case 'pdf':
-                    _exportPdf(dash.requireValue);
-                  case 'email':
-                    _testEmail();
-                }
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'xlsx', child: Text('Export Excel')),
-                PopupMenuItem(value: 'pdf', child: Text('Export PDF')),
-                PopupMenuItem(value: 'email', child: Text('Tester l’email')),
-              ],
-            ),
-        ],
-      ),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          invalidatePricing(ref);
-          await ref.read(dashboardProvider(_dashKey).future);
-        },
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _toolbar(),
-              const SizedBox(height: 12),
-              AsyncView(
-                value: dash,
-                onRetry: () => ref.invalidate(dashboardProvider(_dashKey)),
-                builder: (data) => _content(data, isAdmin),
-              ),
+    return PageScaffold(
+      title: 'Tableau de bord',
+      actions: [
+        if (isAdmin)
+          ActionMenu<String>(
+            busy: _busy,
+            enabled: dash.hasValue,
+            onSelected: (v) {
+              switch (v) {
+                case 'xlsx':
+                  _exportExcel();
+                case 'pdf':
+                  _exportPdf(dash.requireValue);
+                case 'email':
+                  _testEmail();
+              }
+            },
+            items: [
+              menuItem('xlsx', Icons.grid_on_rounded, 'Export Excel'),
+              menuItem('pdf', Icons.picture_as_pdf_outlined, 'Export PDF'),
+              menuItem('email', Icons.mark_email_read_outlined, 'Tester l’email'),
             ],
           ),
-        ),
+      ],
+      onRefresh: () async {
+        invalidatePricing(ref);
+        await ref.read(dashboardProvider(_dashKey).future);
+      },
+      filterBar: Row(
+        children: [
+          Expanded(
+            child: ProductSelector(value: _product, onChanged: (p) => _reset(() => _product = p)),
+          ),
+          const SizedBox(width: 8),
+          YearSelector(value: _year, onChanged: (y) => _reset(() => _year = y)),
+        ],
       ),
-    );
-  }
-
-  Widget _toolbar() {
-    final now = DateTime.now().year;
-    return Row(
       children: [
-        Expanded(
-          child: ProductSelector(
-            value: _product,
-            onChanged: (p) => _reset(() => _product = p),
-          ),
-        ),
-        const SizedBox(width: 10),
-        SizedBox(
-          width: 110,
-          child: LabeledDropdown<int>(
-            label: 'Année',
-            value: _year,
-            items: {for (final y in [now - 1, now, now + 1]) y: '$y'},
-            onChanged: (y) => _reset(() => _year = y),
-          ),
+        AsyncView(
+          value: dash,
+          onRetry: () => ref.invalidate(dashboardProvider(_dashKey)),
+          builder: (data) => _content(data, isAdmin),
         ),
       ],
     );
   }
 
   Widget _content(DashboardData data, bool isAdmin) {
+    final p = context.palette;
     final k = _quinzaineKey;
     final detail = k == null ? null : ref.watch(quinzaineDetailProvider(k));
-    final defaultCalcs = [
-      ...?detail?.value?.calculations.where((c) => c.isDefaultConfig),
-    ]..sort((a, b) => a.calculationDate.compareTo(b.calculationDate));
+    final defaultCalcs = [...?detail?.value?.calculations.where((c) => c.isDefaultConfig)]
+      ..sort((a, b) => a.calculationDate.compareTo(b.calculationDate));
     final latest = defaultCalcs.isEmpty ? null : defaultCalcs.last;
 
     final selectedIndex = data.grid.indexWhere(
       (q) => q.month == _selected?.month && q.period == _selected?.period,
     );
     final selectedCell = selectedIndex >= 0 ? data.grid[selectedIndex] : null;
-    final previousPrice =
-        selectedIndex > 0 ? data.grid[selectedIndex - 1].lastPriceTtc : null;
-    final variation = latest != null && previousPrice != null
-        ? latest.purchasePriceTtc - previousPrice
-        : null;
+    final previousPrice = selectedIndex > 0 ? data.grid[selectedIndex - 1].lastPriceTtc : null;
+    final variation =
+        latest != null && previousPrice != null ? latest.purchasePriceTtc - previousPrice : null;
 
     final evolution = _selected != null && detail?.value != null
         ? [for (final c in defaultCalcs) DatedValue(c.calculationDate, c.purchasePriceTtc)]
@@ -197,16 +153,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         : ref.watch(windowQuotesProvider(
             (product: _product, from: window.windowStart, to: window.windowEnd),
           ));
-    final quotes = _selected != null && windowQuotes?.value != null
-        ? windowQuotes!.value!
-        : data.rawQuotations;
-    final quotesAverage = quotes.isEmpty
-        ? null
-        : quotes.fold<double>(0, (s, q) => s + q.value) / quotes.length;
+    final quotes =
+        _selected != null && windowQuotes?.value != null ? windowQuotes!.value! : data.rawQuotations;
+    final quotesAverage =
+        quotes.isEmpty ? null : quotes.fold<double>(0, (s, q) => s + q.value) / quotes.length;
 
     final selectedLabel = selectedCell?.label ?? data.displayQuinzaine?.label ?? '';
-    final hasNoData =
-        data.todayPriceTtc == null && data.grid.every((q) => q.lastPriceTtc == null);
+    final hasNoData = data.todayPriceTtc == null && data.grid.every((q) => q.lastPriceTtc == null);
 
     _lastView = _DashboardView(
       data: data,
@@ -214,33 +167,34 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       variation: variation,
       selectedLabel: selectedLabel,
       quotes: quotes,
+      quotesAverage: quotesAverage,
+      evolution: evolution,
     );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (hasNoData) ...[
+        if (hasNoData)
           InfoBanner(
             'Aucune cotation disponible pour ${_product.code} / $_year. '
             '${isAdmin ? 'Importez des données' : 'Consultez les cotations'} '
             'pour afficher les KPIs.',
           ),
-          const SizedBox(height: 12),
-        ],
-        if (data.usingFallback && data.displayQuinzaine != null) ...[
+        if (data.usingFallback && data.displayQuinzaine != null)
           InfoBanner(
             'Pas de calcul sur la quinzaine active'
             '${data.activeQuinzaine != null ? ' (${data.activeQuinzaine!.label})' : ''}'
             ' — affichage de ${data.displayQuinzaine!.label}. '
             'Touchez une case de la grille pour changer.',
-            color: AppColors.navy,
+            kind: BannerKind.info,
           ),
-          const SizedBox(height: 12),
-        ],
+        _HeroPrice(data: data, variation: variation, product: _product),
+        const SizedBox(height: 10),
         KpiGrid(children: [
           KpiCard(
             label: 'Quinzaine active',
             value: data.activeQuinzaine?.label ?? 'Aucune',
+            icon: Icons.event_available_rounded,
             sub: data.usingFallback && data.displayQuinzaine != null
                 ? 'Affichage : ${data.displayQuinzaine!.label}'
                 : null,
@@ -248,61 +202,42 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           KpiCard(
             label: 'CIF NWE moyen',
             value: formatValue(data.cifNweAverage),
-            sub: data.cifNweAverage != null
-                ? '${data.cifQuotationsCount} cotation(s) · \$/T'
-                : '—',
-          ),
-          KpiCard(
-            label: 'Prix TTC du jour',
-            value: formatPrice(data.todayPriceTtc),
-            sub: '${data.todayPriceDate != null ? formatDate(data.todayPriceDate) : '—'} · MAD/M³',
-            accent: true,
-          ),
-          KpiCard(
-            label: 'Fenêtre de cotation',
-            value: data.windowStart != null
-                ? '${formatDate(data.windowStart)} → ${formatDate(data.windowEnd)}'
-                : '—',
+            icon: Icons.water_drop_outlined,
+            sub: data.cifNweAverage != null ? '${data.cifQuotationsCount} cotation(s) · \$/T' : '—',
           ),
         ]),
-        const SizedBox(height: 12),
         Panel(
-          title: 'Prix MAD TTC/M³ — ${_product.code} ($_year vs ${_year - 1})',
-          child: RepaintBoundary(
-            key: _comparisonKey,
-            child: Container(
-              color: Colors.white,
-              child: SeriesChart(
-                labels: [for (final c in data.currentYear) c.label],
-                leftAxisName: 'MAD/M³',
-                series: [
-                  ChartSeries(
-                    name: '$_year',
-                    values: [for (final c in data.currentYear) c.value],
-                    color: AppColors.navy,
-                  ),
-                  ChartSeries(
-                    name: '${_year - 1}',
-                    values: [
-                      for (var i = 0; i < data.currentYear.length; i++)
-                        i < data.previousYear.length ? data.previousYear[i].value : null,
-                    ],
-                    color: AppColors.orange,
-                    dashed: true,
-                  ),
-                ],
+          title: 'Prix MAD TTC/M³',
+          subtitle: '${_product.code} · $_year vs ${_year - 1}',
+          icon: Icons.stacked_line_chart_rounded,
+          child: SeriesChart(
+            labels: [for (final c in data.currentYear) c.label],
+            leftAxisName: 'MAD/M³',
+            series: [
+              ChartSeries(
+                name: '$_year',
+                values: [for (final c in data.currentYear) c.value],
+                color: p.primary,
+                area: true,
               ),
-            ),
+              ChartSeries(
+                name: '${_year - 1}',
+                values: _previousYearValues(data),
+                color: p.chartAlt,
+                dashed: true,
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 12),
         Panel(
-          title: 'Prix MAD TTC/M³ — ${_product.code} ($_year)',
+          title: 'Quinzaines $_year',
+          subtitle: 'Dernier prix TTC calculé',
+          icon: Icons.calendar_view_month_rounded,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const _StatusLegend(),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               _QuinzaineGrid(
                 cells: data.grid,
                 selected: _selected,
@@ -311,9 +246,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ],
           ),
         ),
-        const SizedBox(height: 12),
         Panel(
-          title: 'Détail — $selectedLabel',
+          title: 'Détail du calcul',
+          subtitle: selectedLabel,
+          icon: Icons.receipt_long_rounded,
           trailing: k == null
               ? null
               : TextButton(
@@ -324,14 +260,18 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   child: const Text('Ouvrir'),
                 ),
           child: detail?.isLoading ?? false
-              ? const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Center(child: CircularProgressIndicator()),
-                )
+              ? const Column(children: [
+                  Skeleton(height: 18),
+                  SizedBox(height: 10),
+                  Skeleton(height: 18),
+                  SizedBox(height: 10),
+                  Skeleton(height: 18),
+                ])
               : latest == null
                   ? EmptyState(
                       'Aucun calcul pour cette quinzaine.'
                       '${isAdmin ? ' Utilisez « Recalculer » dans Quinzaines.' : ''}',
+                      icon: Icons.calculate_outlined,
                     )
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -339,9 +279,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                         Text(
                           'Calculé le ${formatDate(latest.calculationDate)} · '
                           '${latest.quotationsCount} cotation(s)',
-                          style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                          style: TextStyle(fontSize: 12, color: p.textMuted),
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 4),
                         for (final row in _breakdown)
                           KeyValueRow(
                             row.label(latest),
@@ -355,76 +295,69 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                           unit: 'MAD/M³',
                           strong: true,
                           highlight: true,
+                          valueColor: p.accent,
                         ),
                         if (variation != null)
                           KeyValueRow(
                             'Variation vs quinzaine précédente',
                             formatSigned(variation),
                             unit: 'MAD/M³',
-                            valueColor: variation <= 0 ? AppColors.green : AppColors.red,
+                            valueColor: variation <= 0 ? p.success : p.danger,
                             strong: true,
                           ),
                       ],
                     ),
         ),
-        const SizedBox(height: 12),
         Panel(
-          title: 'Évolution — $selectedLabel',
+          title: 'Évolution du prix',
+          subtitle: selectedLabel,
+          icon: Icons.timeline_rounded,
           child: evolution.isEmpty
-              ? const EmptyState('Pas de données d’évolution')
-              : RepaintBoundary(
-                  key: _evolutionKey,
-                  child: Container(
-                    color: Colors.white,
-                    child: SeriesChart(
-                      labels: [for (final e in evolution) formatDate(e.date)],
-                      leftAxisName: 'MAD TTC/M³',
-                      series: [
-                        ChartSeries(
-                          name: 'Prix MAD TTC/M³',
-                          values: [for (final e in evolution) e.value],
-                          color: AppColors.navy,
-                        ),
-                      ],
+              ? const EmptyState('Pas de données d’évolution', icon: Icons.show_chart_rounded)
+              : SeriesChart(
+                  labels: [for (final e in evolution) formatDate(e.date)],
+                  leftAxisName: 'MAD TTC/M³',
+                  series: [
+                    ChartSeries(
+                      name: 'Prix MAD TTC/M³',
+                      values: [for (final e in evolution) e.value],
+                      color: p.primary,
+                      area: true,
                     ),
-                  ),
+                  ],
                 ),
         ),
-        const SizedBox(height: 12),
         Panel(
-          title: 'Cotations Platts CIF NWE — $selectedLabel',
+          title: 'Cotations Platts CIF NWE',
+          subtitle: selectedLabel,
+          icon: Icons.insights_rounded,
           child: quotes.isEmpty
-              ? const EmptyState('Aucune cotation dans la fenêtre.')
-              : RepaintBoundary(
-                  key: _plattsKey,
-                  child: Container(
-                    color: Colors.white,
-                    child: SeriesChart(
-                      labels: [for (final q in quotes) formatDate(q.date)],
-                      leftAxisName: r'CIF NWE $/T',
-                      referenceY: quotesAverage,
-                      referenceLabel: quotesAverage == null
-                          ? null
-                          : 'Moyenne : ${formatValue(quotesAverage)} \$/T',
-                      series: [
-                        ChartSeries(
-                          name: r'CIF NWE $/T',
-                          values: [for (final q in quotes) q.value],
-                          color: AppColors.navy,
-                          area: true,
-                          digits: valueDigits,
-                        ),
-                      ],
+              ? const EmptyState('Aucune cotation dans la fenêtre.', icon: Icons.insights_rounded)
+              : SeriesChart(
+                  labels: [for (final q in quotes) formatDate(q.date)],
+                  leftAxisName: r'CIF NWE $/T',
+                  referenceY: quotesAverage,
+                  referenceLabel:
+                      quotesAverage == null ? null : 'Moyenne : ${formatValue(quotesAverage)} \$/T',
+                  series: [
+                    ChartSeries(
+                      name: r'CIF NWE $/T',
+                      values: [for (final q in quotes) q.value],
+                      color: p.seriesAt(1),
+                      area: true,
+                      digits: valueDigits,
                     ),
-                  ),
+                  ],
                 ),
         ),
-        const SizedBox(height: 24),
       ],
     );
   }
 
-  _DashboardView? _lastView;
+  static List<double?> _previousYearValues(DashboardData data) => [
+        for (var i = 0; i < data.currentYear.length; i++)
+          i < data.previousYear.length ? data.previousYear[i].value : null,
+      ];
 
   Future<void> _exportExcel() async {
     setState(() => _busy = true);
@@ -449,10 +382,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     if (view == null) return;
     setState(() => _busy = true);
     await runAction(context, () async {
-      final comparison = await captureWidget(_comparisonKey);
-      final evolution = await captureWidget(_evolutionKey);
-      final platts = await captureWidget(_plattsKey);
-
       final months = List.generate(12, (i) => i + 1);
       String cell(int m, int p) {
         final c = data.grid.where((g) => g.month == m && g.period == p);
@@ -462,7 +391,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       final latest = view.latest;
       final bytes = await buildA4Report(
         title: 'Tableau de bord - ${_product.code} $_year',
-        subtitle: '${view.selectedLabel.isNotEmpty ? 'Quinzaine affichée : ${view.selectedLabel} · ' : ''}'
+        subtitle:
+            '${view.selectedLabel.isNotEmpty ? 'Quinzaine affichée : ${view.selectedLabel} · ' : ''}'
             'Exporté le ${exportStamp()}',
         blocks: [
           PdfKpis([
@@ -478,8 +408,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   : '${formatDate(data.windowStart)} au ${formatDate(data.windowEnd)}',
             ),
           ]),
-          if (comparison != null)
-            PdfImage('Prix MAD TTC/M³ — ${_product.code} ($_year vs ${_year - 1})', comparison),
+          if (data.currentYear.isNotEmpty)
+            PdfLineChart(
+              title: 'Prix MAD TTC/M³ — ${_product.code} ($_year vs ${_year - 1})',
+              labels: [for (final c in data.currentYear) c.label],
+              leftAxisName: 'MAD/M³',
+              height: 130,
+              series: [
+                PdfSeries('$_year', [for (final c in data.currentYear) c.value], area: true),
+                PdfSeries('${_year - 1}', _previousYearValues(data), color: pdfOrange, dashed: true),
+              ],
+            ),
           PdfTable(
             title: 'Prix TTC par quinzaine ($_year)',
             headers: const ['Mois', 'Q1', 'Q2'],
@@ -505,11 +444,31 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             totalRow: latest != null,
             half: true,
           ),
-          if (evolution != null)
-            PdfImage('Évolution — ${view.selectedLabel}', evolution, half: platts != null),
-          if (platts != null)
-            PdfImage('Cotations Platts CIF NWE — ${view.selectedLabel}', platts,
-                half: evolution != null),
+          if (view.evolution.isNotEmpty)
+            PdfLineChart(
+              title: 'Évolution — ${view.selectedLabel}',
+              labels: [for (final e in view.evolution) formatDate(e.date)],
+              leftAxisName: 'MAD TTC/M³',
+              half: view.quotes.isNotEmpty,
+              series: [
+                PdfSeries('Prix MAD TTC/M³', [for (final e in view.evolution) e.value], area: true),
+              ],
+            ),
+          if (view.quotes.isNotEmpty)
+            PdfLineChart(
+              title: 'Cotations Platts CIF NWE — ${view.selectedLabel}',
+              labels: [for (final q in view.quotes) formatDate(q.date)],
+              leftAxisName: r'CIF NWE $/T',
+              referenceY: view.quotesAverage,
+              referenceLabel: view.quotesAverage == null
+                  ? null
+                  : 'Moyenne : ${formatValue(view.quotesAverage)} \$/T',
+              half: view.evolution.isNotEmpty,
+              series: [
+                PdfSeries(r'CIF NWE $/T', [for (final q in view.quotes) q.value],
+                    color: pdfTeal, area: true),
+              ],
+            ),
         ],
       );
       if (mounted) {
@@ -537,8 +496,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       final reason = switch (res['reason']) {
         'no_calculations' => 'aucun calcul en base — recalculez une quinzaine d’abord',
         'no_active_quinzaine' => 'pas de quinzaine active',
-        'no_recipients' =>
-          'aucun destinataire — cochez « Reçoit l’email quotidien » dans Utilisateurs',
+        'no_recipients' => 'aucun destinataire — cochez « Reçoit l’email quotidien » dans Utilisateurs',
         final r => r?.toString() ?? 'inconnu',
       };
       showToast(context, 'Email non envoyé : $reason', error: true);
@@ -553,6 +511,8 @@ class _DashboardView {
     required this.variation,
     required this.selectedLabel,
     required this.quotes,
+    required this.quotesAverage,
+    required this.evolution,
   });
 
   final DashboardData data;
@@ -560,6 +520,143 @@ class _DashboardView {
   final double? variation;
   final String selectedLabel;
   final List<DatedValue> quotes;
+  final double? quotesAverage;
+  final List<DatedValue> evolution;
+}
+
+/// Today's TTC price on the brand gradient.
+class _HeroPrice extends StatelessWidget {
+  const _HeroPrice({required this.data, required this.variation, required this.product});
+
+  final DashboardData data;
+  final double? variation;
+  final Product product;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = Colors.white.withValues(alpha: 0.72);
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: brandGradient,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: context.palette.isDark
+            ? null
+            : [BoxShadow(color: AppColors.navy.withValues(alpha: 0.25), blurRadius: 20, offset: const Offset(0, 8))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.amberBright.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  product.code,
+                  style: const TextStyle(color: AppColors.amberBright, fontSize: 11.5, fontWeight: FontWeight.w700),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('Prix d’achat TTC du jour', style: TextStyle(color: muted, fontSize: 13)),
+              ),
+              if (variation != null) _HeroVariation(variation!),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    formatPrice(data.todayPriceTtc),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 36,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -1,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text('MAD/M³', style: TextStyle(color: muted, fontSize: 13, fontWeight: FontWeight.w600)),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 16,
+            runSpacing: 6,
+            children: [
+              _HeroMeta(Icons.today_rounded,
+                  data.todayPriceDate != null ? formatDate(data.todayPriceDate) : '—'),
+              _HeroMeta(
+                Icons.date_range_rounded,
+                data.windowStart != null
+                    ? 'Fenêtre ${formatDate(data.windowStart)} → ${formatDate(data.windowEnd)}'
+                    : 'Fenêtre —',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroMeta extends StatelessWidget {
+  const _HeroMeta(this.icon, this.text);
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = Colors.white.withValues(alpha: 0.72);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 15, color: muted),
+        const SizedBox(width: 5),
+        Text(text, style: TextStyle(color: muted, fontSize: 12.5)),
+      ],
+    );
+  }
+}
+
+class _HeroVariation extends StatelessWidget {
+  const _HeroVariation(this.value);
+
+  final double value;
+
+  @override
+  Widget build(BuildContext context) {
+    final down = value <= 0;
+    final color = down ? const Color(0xFF5EEAD4) : const Color(0xFFFCA5A5);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(down ? Icons.trending_down_rounded : Icons.trending_up_rounded, size: 15, color: color),
+          const SizedBox(width: 4),
+          Text(formatSigned(value), style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
 }
 
 class _StatusLegend extends StatelessWidget {
@@ -567,36 +664,19 @@ class _StatusLegend extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Wrap(
-      spacing: 14,
+      spacing: 6,
+      runSpacing: 6,
       children: [
-        for (final e in quinzaineStatusLabels.entries)
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: AppColors.status(e.key),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 5),
-              Text(e.value, style: const TextStyle(fontSize: 11)),
-            ],
-          ),
+        for (final e in quinzaineStatusLabels.entries) StatusChip(e.value, color: p.status(e.key)),
       ],
     );
   }
 }
 
 class _QuinzaineGrid extends StatelessWidget {
-  const _QuinzaineGrid({
-    required this.cells,
-    required this.selected,
-    required this.onTap,
-  });
+  const _QuinzaineGrid({required this.cells, required this.selected, required this.onTap});
 
   final List<GridCell> cells;
   final ({int month, int period})? selected;
@@ -606,62 +686,71 @@ class _QuinzaineGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, c) {
-        final perRow = c.maxWidth > 600 ? 6 : 4;
-        final w = (c.maxWidth - (perRow - 1) * 6) / perRow;
+        final perRow = c.maxWidth > 600 ? 6 : 3;
+        final w = (c.maxWidth - (perRow - 1) * 8) / perRow;
         return Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: [
-            for (final cell in cells)
-              SizedBox(
-                width: w,
-                child: _cell(cell),
-              ),
-          ],
+          spacing: 8,
+          runSpacing: 8,
+          children: [for (final cell in cells) SizedBox(width: w, child: _cell(context, cell))],
         );
       },
     );
   }
 
-  Widget _cell(GridCell cell) {
+  Widget _cell(BuildContext context, GridCell cell) {
+    final p = context.palette;
     final active = selected?.month == cell.month && selected?.period == cell.period;
-    final color = AppColors.status(cell.status);
-    return Material(
-      color: active ? AppColors.amberSoft : Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-        side: BorderSide(
-          color: active ? AppColors.amber : AppColors.border,
-          width: active ? 2 : 1,
-        ),
+    final color = p.status(cell.status);
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      decoration: BoxDecoration(
+        color: active ? p.accentSoft : p.surfaceAlt,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: active ? p.accent : Colors.transparent, width: 1.6),
       ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: () => onTap(cell),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 6),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                cell.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-              ),
-              Text(
-                quinzaineStatusLabels[cell.status] ?? cell.status,
-                style: TextStyle(fontSize: 9.5, color: color, fontWeight: FontWeight.w600),
-              ),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  formatPrice(cell.lastPriceTtc),
-                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => onTap(cell),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 8, 9),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        cell.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: p.textMuted),
+                      ),
+                    ),
+                    Container(
+                      width: 7,
+                      height: 7,
+                      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                    ),
+                  ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 4),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    formatPrice(cell.lastPriceTtc),
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: cell.lastPriceTtc == null ? p.textMuted : p.textPrimary,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

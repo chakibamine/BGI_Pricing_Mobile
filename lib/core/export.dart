@@ -1,9 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -37,13 +35,13 @@ Future<void> saveAndOffer(
       mainAxisSize: MainAxisSize.min,
       children: [
         ListTile(
-          leading: const Icon(Icons.check_circle, color: AppColors.green),
-          title: Text(filename),
+          leading: IconBubble(Icons.check_rounded, color: ctx.palette.success, size: 40),
+          title: Text(filename, style: const TextStyle(fontWeight: FontWeight.w600)),
           subtitle: const Text('Fichier enregistré'),
         ),
         const Divider(height: 1),
         ListTile(
-          leading: const Icon(Icons.open_in_new),
+          leading: const Icon(Icons.open_in_new_rounded),
           title: const Text('Ouvrir'),
           onTap: () async {
             Navigator.pop(ctx);
@@ -58,7 +56,7 @@ Future<void> saveAndOffer(
           },
         ),
         ListTile(
-          leading: const Icon(Icons.share),
+          leading: const Icon(Icons.ios_share_rounded),
           title: const Text('Partager / Enregistrer sous…'),
           onTap: () async {
             Navigator.pop(ctx);
@@ -78,16 +76,6 @@ Future<void> saveAndOffer(
       ],
     ),
   );
-}
-
-/// PNG snapshot of a widget wrapped in a RepaintBoundary with [key].
-Future<Uint8List?> captureWidget(GlobalKey key, {double pixelRatio = 2.5}) async {
-  final boundary =
-      key.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-  if (boundary == null) return null;
-  final image = await boundary.toImage(pixelRatio: pixelRatio);
-  final data = await image.toByteData(format: ui.ImageByteFormat.png);
-  return data?.buffer.asUint8List();
 }
 
 String exportStamp() {

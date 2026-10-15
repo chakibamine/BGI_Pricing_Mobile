@@ -92,13 +92,14 @@ class SeriesChart extends StatelessWidget {
         ? v
         : right.min + (v - left.min) / left.span * right.span;
 
+    final p = context.palette;
     final step = math.max(1, (labels.length / 6).ceil());
-    const tickStyle = TextStyle(fontSize: 10, color: AppColors.muted);
+    final tickStyle = TextStyle(fontSize: 10, color: p.textMuted);
 
     AxisTitles valueTitles(bool isRight, String? name) => AxisTitles(
           axisNameWidget: name == null
               ? null
-              : Text(name, style: const TextStyle(fontSize: 10, color: AppColors.muted)),
+              : Text(name, style: TextStyle(fontSize: 10, color: p.textMuted)),
           axisNameSize: name == null ? 0 : 16,
           sideTitles: SideTitles(
             showTitles: true,
@@ -131,12 +132,25 @@ class SeriesChart extends StatelessWidget {
           isCurved: true,
           preventCurveOverShooting: true,
           color: s.color,
-          barWidth: 2,
+          barWidth: 2.4,
+          isStrokeCapRound: true,
           dashArray: s.dashed ? [5, 4] : null,
-          dotData: FlDotData(show: s.dots && labels.length <= 31),
+          dotData: FlDotData(
+            show: s.dots && labels.length <= 31,
+            getDotPainter: (_, _, _, _) => FlDotCirclePainter(
+              radius: 2.6,
+              color: s.color,
+              strokeWidth: 1.5,
+              strokeColor: p.surface,
+            ),
+          ),
           belowBarData: BarAreaData(
             show: s.area,
-            color: s.color.withValues(alpha: 0.08),
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [s.color.withValues(alpha: p.isDark ? 0.30 : 0.20), s.color.withValues(alpha: 0)],
+            ),
           ),
         ),
     ];
@@ -145,21 +159,38 @@ class SeriesChart extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Wrap(
-          spacing: 14,
-          runSpacing: 4,
+          spacing: 6,
+          runSpacing: 6,
           children: [
             for (final s in series)
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(width: 14, height: 3, color: s.color),
-                  const SizedBox(width: 5),
-                  Text(s.name, style: const TextStyle(fontSize: 11)),
-                ],
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: p.tint(s.color),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: s.dashed ? 12 : 8,
+                      height: s.dashed ? 3 : 8,
+                      decoration: BoxDecoration(
+                        color: s.color,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      s.name,
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: p.textPrimary),
+                    ),
+                  ],
+                ),
               ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         SizedBox(
           height: height,
           child: LineChart(
@@ -172,7 +203,7 @@ class SeriesChart extends StatelessWidget {
               gridData: FlGridData(
                 drawVerticalLine: false,
                 getDrawingHorizontalLine: (_) =>
-                    const FlLine(color: AppColors.border, strokeWidth: 1, dashArray: [3, 3]),
+                    FlLine(color: p.chartGrid, strokeWidth: 1, dashArray: const [3, 3]),
               ),
               borderData: FlBorderData(show: false),
               titlesData: FlTitlesData(
@@ -205,15 +236,15 @@ class SeriesChart extends StatelessWidget {
                       horizontalLines: [
                         HorizontalLine(
                           y: referenceY!,
-                          color: AppColors.orange,
+                          color: p.chartAlt,
                           strokeWidth: 1.5,
                           dashArray: [6, 4],
                           label: HorizontalLineLabel(
                             show: referenceLabel != null,
                             alignment: Alignment.topRight,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 10,
-                              color: Color(0xFFC2410C),
+                              color: p.chartAlt,
                               fontWeight: FontWeight.w600,
                             ),
                             labelResolver: (_) => referenceLabel ?? '',
@@ -225,14 +256,15 @@ class SeriesChart extends StatelessWidget {
                 touchTooltipData: LineTouchTooltipData(
                   fitInsideHorizontally: true,
                   fitInsideVertically: true,
-                  getTooltipColor: (_) => AppColors.navy,
+                  getTooltipColor: (_) => p.isDark ? p.surfaceAlt : AppColors.navyDeep,
+                  tooltipBorderRadius: BorderRadius.circular(10),
                   getTooltipItems: (spots) => [
                     for (final (n, spot) in spots.indexed)
                       LineTooltipItem(
                         '${n == 0 ? '${labels[spot.x.round()]}\n' : ''}'
                         '${series[spot.barIndex].name} : '
                         '${formatNumber(series[spot.barIndex].values[spot.x.round()], series[spot.barIndex].digits)}',
-                        const TextStyle(color: Colors.white, fontSize: 11),
+                        TextStyle(color: p.isDark ? p.textPrimary : Colors.white, fontSize: 11),
                       ),
                   ],
                 ),

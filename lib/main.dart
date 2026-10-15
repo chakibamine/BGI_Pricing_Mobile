@@ -29,7 +29,10 @@ class BgiPricingApp extends ConsumerWidget {
     return MaterialApp.router(
       title: 'BGI Pricing',
       debugShowCheckedModeBanner: false,
-      theme: buildTheme(),
+      theme: buildLightTheme(),
+      darkTheme: buildDarkTheme(),
+      themeMode: ref.watch(themeModeProvider),
+      themeAnimationDuration: const Duration(milliseconds: 250),
       routerConfig: ref.watch(routerProvider),
       locale: const Locale('fr'),
       supportedLocales: const [Locale('fr'), Locale('en')],

@@ -38,12 +38,15 @@ final _calendarProvider = FutureProvider.autoDispose
   return (res as List).map((e) => CalendarDay.fromJson(e as Json)).toList();
 });
 
+
 class CotationsScreen extends ConsumerStatefulWidget {
   const CotationsScreen({super.key});
 
   @override
   ConsumerState<CotationsScreen> createState() => _CotationsScreenState();
 }
+
+typedef _Filters = ({String from, String to, String status, String source, String correction});
 
 class _CotationsScreenState extends ConsumerState<CotationsScreen> {
   static const _pageSize = 25;
@@ -59,13 +62,7 @@ class _CotationsScreenState extends ConsumerState<CotationsScreen> {
 
   _QuotesKey get _key => (product: _product, from: _from, to: _to);
 
-  bool get _hasFilters =>
-      _product != 'GASOIL' ||
-      _from.isNotEmpty ||
-      _to.isNotEmpty ||
-      _status.isNotEmpty ||
-      _source.isNotEmpty ||
-      _correction.isNotEmpty;
+  int get _filterCount => [_from, _to, _status, _source, _correction].where((v) => v.isNotEmpty).length;
 
   void _update(VoidCallback change) => setState(() {
         change();
@@ -82,146 +79,105 @@ class _CotationsScreenState extends ConsumerState<CotationsScreen> {
   Widget build(BuildContext context) {
     final isAdmin = ref.watch(isAdminProvider);
     final quotes = ref.watch(_quotationsProvider(_key));
+    final p = context.palette;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Cotations CIF NWE'),
-        actions: [
-          if (isAdmin)
-            PopupMenuButton<String>(
-              enabled: !_busy,
-              icon: _busy
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Icon(Icons.more_vert),
-              onSelected: (v) {
-                switch (v) {
-                  case 'fetch':
-                    _fetchToday();
-                  case 'backfill':
-                    _backfill();
-                }
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'fetch', child: Text('Récupérer Platts (aujourd’hui)')),
-                PopupMenuItem(value: 'backfill', child: Text('Backfill Platts')),
-              ],
-            ),
-        ],
-      ),
+    return PageScaffold(
+      title: 'Cotations',
+      actions: [
+        if (isAdmin)
+          ActionMenu<String>(
+            busy: _busy,
+            onSelected: (v) {
+              switch (v) {
+                case 'fetch':
+                  _fetchToday();
+                case 'backfill':
+                  _backfill();
+              }
+            },
+            items: [
+              menuItem('fetch', Icons.cloud_download_outlined, 'Récupérer Platts (aujourd’hui)'),
+              menuItem('backfill', Icons.history_toggle_off_rounded, 'Backfill Platts'),
+            ],
+          ),
+      ],
       floatingActionButton: isAdmin
-          ? FloatingActionButton(
+          ? FloatingActionButton.extended(
               onPressed: _create,
-              backgroundColor: AppColors.amber,
-              foregroundColor: Colors.white,
-              child: const Icon(Icons.add),
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Cotation'),
             )
           : null,
-      body: RefreshIndicator(
-        onRefresh: () async {
-          _refreshData();
-          await ref.read(_quotationsProvider(_key).future);
-        },
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
-          children: [
-            _filters(quotes.value ?? const []),
-            const SizedBox(height: 12),
-            _calendar(),
-            const SizedBox(height: 12),
-            AsyncView(
-              value: quotes,
-              onRetry: () => ref.invalidate(_quotationsProvider(_key)),
-              builder: (data) => _list(data, isAdmin),
+      onRefresh: () async {
+        _refreshData();
+        await ref.read(_quotationsProvider(_key).future);
+      },
+      filterBar: Row(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final e in const {'GASOIL': 'Gasoil', 'SSP': 'SSP', '': 'Tous'}.entries)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: ChoiceChip(
+                        label: Text(e.value),
+                        selected: _product == e.key,
+                        showCheckmark: false,
+                        onSelected: (_) => _update(() => _product = e.key),
+                      ),
+                    ),
+                ],
+              ),
             ),
-          ],
-        ),
+          ),
+          Badge(
+            isLabelVisible: _filterCount > 0,
+            label: Text('$_filterCount'),
+            backgroundColor: p.accent,
+            child: OutlinedButton.icon(
+              onPressed: () => _openFilters(quotes.value ?? const []),
+              icon: const Icon(Icons.tune_rounded, size: 18),
+              label: const Text('Filtres'),
+            ),
+          ),
+        ],
       ),
+      children: [
+        _calendar(),
+        AsyncView(
+          value: quotes,
+          onRetry: () => ref.invalidate(_quotationsProvider(_key)),
+          builder: (data) => _list(data, isAdmin),
+        ),
+      ],
     );
   }
 
-  Widget _filters(List<Quotation> data) {
+  Future<void> _openFilters(List<Quotation> data) async {
     final sources = {...data.map((q) => q.source)}.toList()..sort();
-    return Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: LabeledDropdown<String>(
-                  label: 'Produit',
-                  value: _product,
-                  items: const {'': 'Tous', 'GASOIL': 'Gasoil', 'SSP': 'SSP'},
-                  onChanged: (v) => _update(() => _product = v),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: LabeledDropdown<String>(
-                  label: 'Statut',
-                  value: _status,
-                  items: {'': 'Tous', ...quotationStatusLabels},
-                  onChanged: (v) => _update(() => _status = v),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: DateField(label: 'Du', value: _from, onChanged: (v) => _update(() => _from = v)),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: DateField(label: 'Au', value: _to, onChanged: (v) => _update(() => _to = v)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: LabeledDropdown<String>(
-                  key: ValueKey('src-${sources.join()}'),
-                  label: 'Source',
-                  value: sources.contains(_source) ? _source : '',
-                  items: {'': 'Toutes', for (final s in sources) s: s},
-                  onChanged: (v) => _update(() => _source = v),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: LabeledDropdown<String>(
-                  label: 'Correction',
-                  value: _correction,
-                  items: const {'': 'Toutes', 'yes': 'Corrigées', 'no': 'Non corrigées'},
-                  onChanged: (v) => _update(() => _correction = v),
-                ),
-              ),
-            ],
-          ),
-          if (_hasFilters)
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: () => _update(() {
-                  _product = 'GASOIL';
-                  _from = _to = _status = _source = _correction = '';
-                }),
-                child: const Text('Réinitialiser'),
-              ),
-            ),
-        ],
+    final result = await showFormSheet<_Filters>(
+      context,
+      title: 'Filtres',
+      builder: (_) => _FiltersForm(
+        initial: (from: _from, to: _to, status: _status, source: _source, correction: _correction),
+        sources: sources,
       ),
     );
+    if (result == null) return;
+    _update(() {
+      _from = result.from;
+      _to = result.to;
+      _status = result.status;
+      _source = result.source;
+      _correction = result.correction;
+    });
   }
 
   Widget _calendar() {
+    final p = context.palette;
     final now = DateTime.now();
     final product = Product.fromCode(_product.isEmpty ? 'GASOIL' : _product);
     final from = _from.isNotEmpty ? _from : isoDate(DateTime(now.year, now.month, 1));
@@ -230,72 +186,102 @@ class _CotationsScreenState extends ConsumerState<CotationsScreen> {
     final days = cal.value ?? const <CalendarDay>[];
 
     return Panel(
-      title: 'Statut par date — ${product.code}${_from.isEmpty && _to.isEmpty ? ' (mois en cours)' : ''}',
+      title: 'Statut par date',
+      subtitle: '${product.code}${_from.isEmpty && _to.isEmpty ? ' · mois en cours' : ''}',
+      icon: Icons.calendar_month_rounded,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Wrap(
-            spacing: 6,
-            runSpacing: 4,
-            children: [
-              for (final e in quotationStatusLabels.entries)
-                StatusChip(e.value, color: _statusColor(e.key)),
-            ],
-          ),
-          const SizedBox(height: 10),
           if (cal.isLoading && days.isEmpty)
-            const Center(child: CircularProgressIndicator())
+            const Skeleton(height: 180, radius: 12)
           else
             LayoutBuilder(builder: (context, c) {
-              final w = (c.maxWidth - 6 * 4) / 7;
-              return Wrap(
-                spacing: 4,
-                runSpacing: 4,
+              const gap = 5.0;
+              final w = (c.maxWidth - 6 * gap) / 7;
+              final offset = days.isEmpty ? 0 : DateTime.parse(days.first.date).weekday - 1;
+              return Column(
                 children: [
-                  for (final d in days)
-                    Tooltip(
-                      message: '${formatDate(d.date)} : ${quotationStatusLabels[d.status] ?? d.status}'
-                          '${d.cifNweValue != null ? ' — ${formatValue(d.cifNweValue)}' : ''}',
-                      triggerMode: TooltipTriggerMode.tap,
-                      child: Container(
-                        width: w,
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        decoration: BoxDecoration(
-                          color: _statusColor(d.status).withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: _statusColor(d.status).withValues(alpha: 0.5)),
+                  Row(
+                    children: [
+                      for (final (i, d) in const ['L', 'M', 'M', 'J', 'V', 'S', 'D'].indexed)
+                        Container(
+                          width: w,
+                          margin: EdgeInsets.only(right: i < 6 ? gap : 0),
+                          alignment: Alignment.center,
+                          child: Text(
+                            d,
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: p.textMuted),
+                          ),
                         ),
-                        child: Column(
-                          children: [
-                            Text(
-                              d.date.substring(8, 10),
-                              style: TextStyle(
-                                fontWeight: FontWeight.w800,
-                                color: _statusColor(d.status),
-                              ),
-                            ),
-                            Text(
-                              d.cifNweValue != null ? formatNumber(d.cifNweValue, 0) : '·',
-                              style: const TextStyle(fontSize: 9, color: AppColors.muted),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: gap,
+                    runSpacing: gap,
+                    children: [
+                      for (var i = 0; i < offset; i++) SizedBox(width: w, height: w),
+                      for (final d in days) _dayCell(d, w),
+                    ],
+                  ),
                 ],
               );
             }),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final e in quotationStatusLabels.entries) StatusChip(e.value, color: _statusColor(p, e.key)),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  static Color _statusColor(String s) => switch (s) {
-        'published' => AppColors.green,
-        'no_data' => AppColors.red,
-        'not_published_yet' => AppColors.amber,
-        'weekend' => const Color(0xFF94A3B8),
-        _ => AppColors.muted,
+  Widget _dayCell(CalendarDay d, double size) {
+    final p = context.palette;
+    final color = _statusColor(p, d.status);
+    final published = d.status == 'published';
+    return Tooltip(
+      message: '${formatDate(d.date)} : ${quotationStatusLabels[d.status] ?? d.status}'
+          '${d.cifNweValue != null ? ' — ${formatValue(d.cifNweValue)}' : ''}',
+      triggerMode: TooltipTriggerMode.tap,
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: published ? color.withValues(alpha: p.isDark ? 0.75 : 0.85) : p.tint(color),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              '${int.parse(d.date.substring(8, 10))}',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+                color: published ? Colors.white : color,
+              ),
+            ),
+            if (d.cifNweValue != null && size > 40)
+              Text(
+                formatNumber(d.cifNweValue, 0),
+                style: TextStyle(fontSize: 8.5, color: published ? Colors.white70 : p.textMuted),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static Color _statusColor(AppPalette p, String s) => switch (s) {
+        'published' => p.success,
+        'no_data' => p.danger,
+        'not_published_yet' => p.warning,
+        _ => p.textMuted,
       };
 
   Widget _list(List<Quotation> data, bool isAdmin) {
@@ -306,7 +292,10 @@ class _CotationsScreenState extends ConsumerState<CotationsScreen> {
             (_correction.isEmpty || (_correction == 'yes') == (q.originalValue != null)))
         .toList();
     if (filtered.isEmpty) {
-      return EmptyState(data.isEmpty ? 'Aucune cotation' : 'Aucune cotation pour ces filtres');
+      return EmptyState(
+        data.isEmpty ? 'Aucune cotation' : 'Aucune cotation pour ces filtres',
+        icon: Icons.insights_rounded,
+      );
     }
 
     final stats = <String, Map<String, ({int count, double sum})>>{};
@@ -345,58 +334,87 @@ class _CotationsScreenState extends ConsumerState<CotationsScreen> {
   }
 
   Widget _tile(Quotation q, bool isAdmin) {
+    final p = context.palette;
     final corrected = q.originalValue != null;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 6),
-      child: ListTile(
-        dense: true,
-        title: Row(
+    final date = DateTime.parse(q.quotationDate.substring(0, 10));
+    return ListCard(
+      leading: Container(
+        width: 44,
+        height: 46,
+        decoration: BoxDecoration(color: p.surfaceAlt, borderRadius: BorderRadius.circular(12)),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(formatDate(q.quotationDate), style: const TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(width: 8),
-            Text(q.product, style: const TextStyle(color: AppColors.muted)),
-            const Spacer(),
             Text(
-              q.cifNweValue != null ? formatValue(q.cifNweValue) : '—',
-              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+              '${date.day}',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: p.textPrimary, height: 1.1),
             ),
+            Text(monthShortLabels[date.month - 1], style: TextStyle(fontSize: 10.5, color: p.textMuted)),
           ],
         ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Wrap(
-            spacing: 6,
-            runSpacing: 4,
-            crossAxisAlignment: WrapCrossAlignment.center,
+      ),
+      title: Row(
+        children: [
+          Text(q.product),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              q.source,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w400, color: p.textMuted),
+            ),
+          ),
+        ],
+      ),
+      subtitle: Padding(
+        padding: const EdgeInsets.only(top: 3),
+        child: Wrap(
+          spacing: 6,
+          runSpacing: 4,
+          children: [
+            StatusChip(quotationStatusLabels[q.status] ?? q.status, color: _statusColor(p, q.status)),
+            if (corrected) StatusChip('Corrigée (orig. ${formatValue(q.originalValue)})', color: p.violet),
+          ],
+        ),
+      ),
+      footer: (q.correctionReason?.isNotEmpty ?? false)
+          ? Text('Motif : ${q.correctionReason}', style: TextStyle(fontSize: 12, color: p.textMuted))
+          : null,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              StatusChip(quotationStatusLabels[q.status] ?? q.status, color: _statusColor(q.status)),
-              Text(q.source, style: const TextStyle(fontSize: 12)),
-              if (corrected)
-                StatusChip(
-                  'Corrigée (orig. ${formatValue(q.originalValue)})',
-                  color: const Color(0xFF7C3AED),
+              Text(
+                q.cifNweValue != null ? formatValue(q.cifNweValue) : '—',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                  color: p.textPrimary,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
-              if (q.correctionReason?.isNotEmpty ?? false)
-                Text('Motif : ${q.correctionReason}', style: const TextStyle(fontSize: 12)),
+              ),
+              Text(r'$/T', style: TextStyle(fontSize: 11, color: p.textMuted)),
             ],
           ),
-        ),
-        trailing: isAdmin
-            ? PopupMenuButton<String>(
-                onSelected: (v) => v == 'correct' ? _correct(q) : _delete(q),
-                itemBuilder: (_) => [
-                  if (q.status == 'published' && q.cifNweValue != null)
-                    const PopupMenuItem(value: 'correct', child: Text('Corriger')),
-                  const PopupMenuItem(
-                    value: 'delete',
-                    child: Text('Supprimer', style: TextStyle(color: AppColors.red)),
-                  ),
-                ],
-              )
-            : null,
+          if (isAdmin)
+            PopupMenuButton<String>(
+              icon: Icon(Icons.more_vert_rounded, color: p.textMuted),
+              onSelected: (v) => v == 'correct' ? _correct(q) : _delete(q),
+              itemBuilder: (_) => [
+                if (q.status == 'published' && q.cifNweValue != null)
+                  menuItem('correct', Icons.edit_outlined, 'Corriger'),
+                menuItem('delete', Icons.delete_outline_rounded, 'Supprimer', danger: true),
+              ],
+            )
+          else
+            const SizedBox(width: 10),
+        ],
       ),
     );
   }
+
 
   Future<void> _fetchToday() async {
     setState(() => _busy = true);
@@ -579,7 +597,7 @@ class _CorrectFormState extends State<_CorrectForm> {
       children: [
         Text('${q.product} — ${formatDate(q.quotationDate)}'),
         if (q.correctionReason != null)
-          Text('Motif précédent : ${q.correctionReason}', style: const TextStyle(color: AppColors.muted)),
+          Text('Motif précédent : ${q.correctionReason}', style: TextStyle(color: context.palette.textMuted)),
         const SizedBox(height: 12),
         TextField(
           controller: _value,
@@ -626,11 +644,10 @@ class _BackfillFormState extends State<_BackfillForm> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
+        const InfoBanner(
           'Maximum 100 jours calendaires. Un seul backfill à la fois.',
-          style: TextStyle(color: AppColors.muted),
+          kind: BannerKind.info,
         ),
-        const SizedBox(height: 12),
         DateField(label: 'Du', value: _from, onChanged: (v) => setState(() => _from = v)),
         const SizedBox(height: 12),
         DateField(label: 'Au', value: _to, onChanged: (v) => setState(() => _to = v)),
@@ -651,6 +668,88 @@ class _BackfillFormState extends State<_BackfillForm> {
                     if (_product.isNotEmpty) 'product': _product,
                   }),
           child: const Text('Lancer'),
+        ),
+      ],
+    );
+  }
+}
+
+class _FiltersForm extends StatefulWidget {
+  const _FiltersForm({required this.initial, required this.sources});
+
+  final _Filters initial;
+  final List<String> sources;
+
+  @override
+  State<_FiltersForm> createState() => _FiltersFormState();
+}
+
+class _FiltersFormState extends State<_FiltersForm> {
+  late String _from = widget.initial.from;
+  late String _to = widget.initial.to;
+  late String _status = widget.initial.status;
+  late String _source = widget.sources.contains(widget.initial.source) ? widget.initial.source : '';
+  late String _correction = widget.initial.correction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(child: DateField(label: 'Du', value: _from, onChanged: (v) => setState(() => _from = v))),
+            const SizedBox(width: 10),
+            Expanded(child: DateField(label: 'Au', value: _to, onChanged: (v) => setState(() => _to = v))),
+          ],
+        ),
+        const SizedBox(height: 12),
+        LabeledDropdown<String>(
+          label: 'Statut',
+          icon: Icons.flag_outlined,
+          value: _status,
+          items: {'': 'Tous', ...quotationStatusLabels},
+          onChanged: (v) => setState(() => _status = v),
+        ),
+        const SizedBox(height: 12),
+        LabeledDropdown<String>(
+          label: 'Source',
+          icon: Icons.source_outlined,
+          value: _source,
+          items: {'': 'Toutes', for (final s in widget.sources) s: s},
+          onChanged: (v) => setState(() => _source = v),
+        ),
+        const SizedBox(height: 12),
+        LabeledDropdown<String>(
+          label: 'Correction',
+          icon: Icons.edit_note_rounded,
+          value: _correction,
+          items: const {'': 'Toutes', 'yes': 'Corrigées', 'no': 'Non corrigées'},
+          onChanged: (v) => setState(() => _correction = v),
+        ),
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => Navigator.pop(
+                  context,
+                  (from: '', to: '', status: '', source: '', correction: ''),
+                ),
+                child: const Text('Réinitialiser'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: FilledButton(
+                onPressed: () => Navigator.pop(
+                  context,
+                  (from: _from, to: _to, status: _status, source: _source, correction: _correction),
+                ),
+                child: const Text('Appliquer'),
+              ),
+            ),
+          ],
         ),
       ],
     );

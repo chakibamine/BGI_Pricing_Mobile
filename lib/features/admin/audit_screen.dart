@@ -26,13 +26,23 @@ const _tableLabels = {
   'users': 'Utilisateurs',
 };
 
-Color _actionColor(String action) => switch (action) {
-      'CREATE' => AppColors.green,
-      'UPDATE' => AppColors.amber,
-      'DELETE' => AppColors.red,
-      'BKAM_FETCH' || 'PLATTS_FETCH' => const Color(0xFF2563EB),
-      _ => AppColors.muted,
+Color _actionColor(AppPalette p, String action) => switch (action) {
+      'CREATE' => p.success,
+      'UPDATE' => p.warning,
+      'DELETE' => p.danger,
+      'BKAM_FETCH' || 'PLATTS_FETCH' => p.info,
+      _ => p.textMuted,
     };
+
+IconData _actionIcon(String action) => switch (action) {
+      'CREATE' => Icons.add_circle_outline_rounded,
+      'UPDATE' => Icons.edit_outlined,
+      'DELETE' => Icons.delete_outline_rounded,
+      'BKAM_FETCH' || 'PLATTS_FETCH' => Icons.cloud_download_outlined,
+      _ => Icons.history_rounded,
+    };
+
+typedef _Filters = ({String action, String table, String from, String to});
 
 typedef _AuditKey = ({String action, String table, String from, String to});
 
@@ -89,75 +99,68 @@ class _AuditScreenState extends ConsumerState<AuditScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final logs = ref.watch(_auditProvider(_key));
-    return Scaffold(
-      appBar: AppBar(title: const Text('Journal d’audit')),
-      body: RefreshIndicator(
-        onRefresh: () => ref.refresh(_auditProvider(_key).future),
-        child: ListView(
-          padding: const EdgeInsets.all(12),
-          children: [
-            Panel(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: LabeledDropdown<String>(
-                          label: 'Action',
-                          value: _action,
-                          items: {'': 'Toutes', ..._actionLabels},
-                          onChanged: (v) => _update(() => _action = v),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: LabeledDropdown<String>(
-                          label: 'Entité',
-                          value: _table,
-                          items: {'': 'Toutes', ..._tableLabels},
-                          onChanged: (v) => _update(() => _table = v),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(child: DateField(label: 'Du', value: _from, onChanged: (v) => _update(() => _from = v))),
-                      const SizedBox(width: 8),
-                      Expanded(child: DateField(label: 'Au', value: _to, onChanged: (v) => _update(() => _to = v))),
-                    ],
-                  ),
-                  if (_hasFilters)
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton(
-                        onPressed: () => _update(() => _action = _table = _from = _to = ''),
-                        child: const Text('Réinitialiser'),
-                      ),
-                    ),
-                ],
-              ),
+    final count = [_action, _table, _from, _to].where((v) => v.isNotEmpty).length;
+    return PageScaffold(
+      title: 'Journal d’audit',
+      onRefresh: () => ref.refresh(_auditProvider(_key).future),
+      filterBar: Row(
+        children: [
+          Expanded(
+            child: Text(
+              logs.hasValue
+                  ? '${logs.value!.length} ${logs.value!.length <= 1 ? 'entrée' : 'entrées'}${_hasFilters ? ' (filtrées)' : ''}'
+                  : '',
+              style: TextStyle(color: p.textMuted, fontWeight: FontWeight.w500),
             ),
-            const SizedBox(height: 12),
-            AsyncView(
-              value: logs,
-              onRetry: () => ref.invalidate(_auditProvider(_key)),
-              builder: _list,
+          ),
+          Badge(
+            isLabelVisible: count > 0,
+            label: Text('$count'),
+            backgroundColor: p.accent,
+            child: OutlinedButton.icon(
+              onPressed: _openFilters,
+              icon: const Icon(Icons.tune_rounded, size: 18),
+              label: const Text('Filtres'),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
+      children: [
+        AsyncView(
+          value: logs,
+          onRetry: () => ref.invalidate(_auditProvider(_key)),
+          builder: _list,
+        ),
+      ],
     );
   }
 
+  Future<void> _openFilters() async {
+    final result = await showFormSheet<_Filters>(
+      context,
+      title: 'Filtres',
+      builder: (_) => _FiltersForm(initial: (action: _action, table: _table, from: _from, to: _to)),
+    );
+    if (result == null) return;
+    _update(() {
+      _action = result.action;
+      _table = result.table;
+      _from = result.from;
+      _to = result.to;
+    });
+  }
+
   Widget _list(List<AuditLog> data) {
+    final p = context.palette;
     if (data.isEmpty) {
-      return EmptyState(_hasFilters
-          ? 'Aucune entrée pour ces filtres. Essayez d’élargir la période ou de réinitialiser.'
-          : 'Aucune entrée d’audit pour le moment.');
+      return EmptyState(
+        _hasFilters
+            ? 'Aucune entrée pour ces filtres. Essayez d’élargir la période ou de réinitialiser.'
+            : 'Aucune entrée d’audit pour le moment.',
+        icon: Icons.history_rounded,
+      );
     }
     final totalPages = (data.length / _pageSize).ceil().clamp(1, 1 << 30);
     final page = _page.clamp(1, totalPages);
@@ -167,41 +170,32 @@ class _AuditScreenState extends ConsumerState<AuditScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          '${data.length} ${data.length <= 1 ? 'entrée' : 'entrées'}${_hasFilters ? ' (filtrées)' : ''}',
-          style: const TextStyle(color: AppColors.muted),
-        ),
-        const SizedBox(height: 6),
         for (final row in rows)
-          Card(
-            margin: const EdgeInsets.only(bottom: 6),
-            child: ListTile(
-              dense: true,
-              onTap: () => _detail(row),
-              title: Row(
-                children: [
-                  StatusChip(_actionLabels[row.action] ?? row.action, color: _actionColor(row.action)),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '${_tableLabels[row.tableName] ?? row.tableName} #${row.recordId ?? '—'}',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                      overflow: TextOverflow.ellipsis,
-                    ),
+          ListCard(
+            onTap: () => _detail(row),
+            leading: IconBubble(_actionIcon(row.action), color: _actionColor(p, row.action), size: 40),
+            title: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${_tableLabels[row.tableName] ?? row.tableName} #${row.recordId ?? '—'}',
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ],
-              ),
-              subtitle: Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  '${_dateTime(row.createdAt)} · ${row.username}'
-                  '${(row.description?.trim().isNotEmpty ?? false) ? '\n${row.description!.trim()}' : ''}',
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-              trailing: const Icon(Icons.chevron_right),
+                StatusChip(
+                  _actionLabels[row.action] ?? row.action,
+                  color: _actionColor(p, row.action),
+                  dot: false,
+                ),
+              ],
             ),
+            subtitle: Text(
+              '${_dateTime(row.createdAt)} · ${row.username}'
+              '${(row.description?.trim().isNotEmpty ?? false) ? '\n${row.description!.trim()}' : ''}',
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: Icon(Icons.chevron_right_rounded, color: p.textMuted),
           ),
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
@@ -209,7 +203,7 @@ class _AuditScreenState extends ConsumerState<AuditScreen> {
             children: [
               Text(
                 '${start + 1}–${start + rows.length} sur ${data.length}',
-                style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                style: TextStyle(fontSize: 12, color: p.textMuted),
               ),
               const Spacer(),
               IconButton(
@@ -229,16 +223,17 @@ class _AuditScreenState extends ConsumerState<AuditScreen> {
   }
 
   void _detail(AuditLog row) {
+    final p = context.palette;
     Widget meta(String label, String value) => Padding(
-          padding: const EdgeInsets.only(bottom: 6),
+          padding: const EdgeInsets.only(bottom: 8),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               SizedBox(
                 width: 110,
-                child: Text(label, style: const TextStyle(color: AppColors.muted, fontSize: 12.5)),
+                child: Text(label, style: TextStyle(color: p.textMuted, fontSize: 12.5)),
               ),
-              Expanded(child: Text(value)),
+              Expanded(child: Text(value, style: const TextStyle(fontWeight: FontWeight.w500))),
             ],
           ),
         );
@@ -246,14 +241,15 @@ class _AuditScreenState extends ConsumerState<AuditScreen> {
     Widget jsonBlock(String title, Object? raw) => Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const SizedBox(height: 10),
-            Text(title, style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.navy)),
-            const SizedBox(height: 4),
+            const SizedBox(height: 12),
+            Text(title, style: TextStyle(fontWeight: FontWeight.w700, color: p.textPrimary)),
+            const SizedBox(height: 6),
             Container(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppColors.steel,
-                borderRadius: BorderRadius.circular(8),
+                color: p.surfaceAlt,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: p.border),
               ),
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -282,6 +278,72 @@ class _AuditScreenState extends ConsumerState<AuditScreen> {
           jsonBlock('Après', row.dataAfter),
         ],
       ),
+    );
+  }
+}
+
+class _FiltersForm extends StatefulWidget {
+  const _FiltersForm({required this.initial});
+
+  final _Filters initial;
+
+  @override
+  State<_FiltersForm> createState() => _FiltersFormState();
+}
+
+class _FiltersFormState extends State<_FiltersForm> {
+  late String _action = widget.initial.action;
+  late String _table = widget.initial.table;
+  late String _from = widget.initial.from;
+  late String _to = widget.initial.to;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        LabeledDropdown<String>(
+          label: 'Action',
+          icon: Icons.bolt_rounded,
+          value: _action,
+          items: {'': 'Toutes', ..._actionLabels},
+          onChanged: (v) => setState(() => _action = v),
+        ),
+        const SizedBox(height: 12),
+        LabeledDropdown<String>(
+          label: 'Entité',
+          icon: Icons.category_outlined,
+          value: _table,
+          items: {'': 'Toutes', ..._tableLabels},
+          onChanged: (v) => setState(() => _table = v),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(child: DateField(label: 'Du', value: _from, onChanged: (v) => setState(() => _from = v))),
+            const SizedBox(width: 10),
+            Expanded(child: DateField(label: 'Au', value: _to, onChanged: (v) => setState(() => _to = v))),
+          ],
+        ),
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => Navigator.pop(context, (action: '', table: '', from: '', to: '')),
+                child: const Text('Réinitialiser'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: FilledButton(
+                onPressed: () => Navigator.pop(context, (action: _action, table: _table, from: _from, to: _to)),
+                child: const Text('Appliquer'),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

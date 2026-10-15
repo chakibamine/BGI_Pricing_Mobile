@@ -24,34 +24,37 @@ class UsersScreen extends ConsumerWidget {
     final recipients =
         users.value?.where((u) => u.isActive && u.receivesDailyEmail).length ?? 0;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Utilisateurs')),
-      floatingActionButton: FloatingActionButton(
+    return PageScaffold(
+      title: 'Utilisateurs',
+      floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _create(context, ref),
-        backgroundColor: AppColors.amber,
-        foregroundColor: Colors.white,
-        child: const Icon(Icons.person_add),
+        icon: const Icon(Icons.person_add_alt_rounded),
+        label: const Text('Utilisateur'),
       ),
-      body: RefreshIndicator(
-        onRefresh: () => ref.refresh(_usersProvider.future),
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
-          children: [
-            Text(
-              '$recipients destinataire(s) de l’email quotidien',
-              style: const TextStyle(color: AppColors.muted),
-            ),
-            const SizedBox(height: 8),
-            AsyncView(
-              value: users,
-              onRetry: () => ref.invalidate(_usersProvider),
-              builder: (list) => Column(
-                children: [for (final u in list) _UserCard(user: u, isMe: u.id == meId)],
-              ),
-            ),
-          ],
+      onRefresh: () => ref.refresh(_usersProvider.future),
+      children: [
+        KpiGrid(children: [
+          KpiCard(
+            label: 'Comptes',
+            value: '${users.value?.length ?? '—'}',
+            sub: '${users.value?.where((u) => u.isActive).length ?? 0} actif(s)',
+            icon: Icons.group_outlined,
+          ),
+          KpiCard(
+            label: 'Email quotidien',
+            value: '$recipients',
+            sub: 'destinataire(s)',
+            icon: Icons.mark_email_read_outlined,
+          ),
+        ]),
+        AsyncView(
+          value: users,
+          onRetry: () => ref.invalidate(_usersProvider),
+          builder: (list) => Column(
+            children: [for (final u in list) _UserCard(user: u, isMe: u.id == meId)],
+          ),
         ),
-      ),
+      ],
     );
   }
 
@@ -86,27 +89,36 @@ Future<void> showTempPassword(BuildContext context, String password, {required b
         children: [
           const Text('Affiché une seule fois :'),
           const SizedBox(height: 8),
-          SelectableText(
-            password,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 18, fontWeight: FontWeight.w700),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: ctx.palette.surfaceAlt,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: SelectableText(
+              password,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 18, fontWeight: FontWeight.w700),
+            ),
           ),
           if (forced) ...[
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'Un email de bienvenue a été envoyé. L’utilisateur devra changer ce '
               'mot de passe à la prochaine connexion.',
-              style: TextStyle(color: AppColors.muted),
+              style: TextStyle(color: ctx.palette.textMuted),
             ),
           ],
         ],
       ),
       actions: [
-        TextButton(
+        TextButton.icon(
           onPressed: () {
             Clipboard.setData(ClipboardData(text: password));
             showToast(ctx, 'Copié');
           },
-          child: const Text('Copier'),
+          icon: const Icon(Icons.copy_rounded, size: 18),
+          label: const Text('Copier'),
         ),
         FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fermer')),
       ],
@@ -135,72 +147,85 @@ class _UserCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final u = user;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    final p = context.palette;
+    final admin = u.role == 'admin';
+    final avatarColor = admin ? p.accent : p.seriesAt(u.id % p.chartSeries.length);
+    return ListCard(
+      leading: Opacity(
+        opacity: u.isActive ? 1 : 0.5,
+        child: CircleAvatar(
+          radius: 22,
+          backgroundColor: p.tint(avatarColor),
+          child: Text(
+            _initials(u.username),
+            style: TextStyle(color: avatarColor, fontWeight: FontWeight.w700),
+          ),
+        ),
+      ),
+      title: Text('${u.username}${isMe ? ' (vous)' : ''}'),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(u.email, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              StatusChip(admin ? 'Administrateur' : 'Utilisateur', color: admin ? p.accent : p.info),
+              StatusChip(u.isActive ? 'Actif' : 'Inactif', color: u.isActive ? p.success : p.textMuted),
+            ],
+          ),
+        ],
+      ),
+      trailing: PopupMenuButton<String>(
+        icon: Icon(Icons.more_vert_rounded, color: p.textMuted),
+        onSelected: (v) => _action(context, ref, v),
+        itemBuilder: (_) => [
+          menuItem('edit', Icons.edit_outlined, 'Modifier'),
+          menuItem('force', Icons.key_rounded, 'Forcer MDP', enabled: !isMe),
+          menuItem(
+            'active',
+            u.isActive ? Icons.person_off_outlined : Icons.person_outline_rounded,
+            u.isActive ? 'Désactiver' : 'Activer',
+            enabled: !isMe,
+          ),
+          menuItem('delete', Icons.delete_outline_rounded, 'Supprimer', enabled: !isMe, danger: true),
+        ],
+      ),
+      footer: Container(
+        padding: const EdgeInsets.only(left: 10),
+        decoration: BoxDecoration(color: p.surfaceAlt, borderRadius: BorderRadius.circular(12)),
+        child: Row(
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${u.username}${isMe ? ' (vous)' : ''}',
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                      Text(u.email, style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
-                    ],
-                  ),
-                ),
-                StatusChip(u.isActive ? 'Actif' : 'Inactif',
-                    color: u.isActive ? AppColors.green : AppColors.muted),
-                PopupMenuButton<String>(
-                  onSelected: (v) => _action(context, ref, v),
-                  itemBuilder: (_) => [
-                    const PopupMenuItem(value: 'edit', child: Text('Modifier')),
-                    PopupMenuItem(value: 'force', enabled: !isMe, child: const Text('Forcer MDP')),
-                    PopupMenuItem(
-                      value: 'active',
-                      enabled: !isMe,
-                      child: Text(u.isActive ? 'Désactiver' : 'Activer'),
-                    ),
-                    PopupMenuItem(
-                      value: 'delete',
-                      enabled: !isMe,
-                      child: const Text('Supprimer', style: TextStyle(color: AppColors.red)),
-                    ),
-                  ],
-                ),
-              ],
+            Icon(Icons.schedule_rounded, size: 15, color: p.textMuted),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Connexion : ${u.lastLoginAt != null ? formatDate(u.lastLoginAt) : '—'}',
+                style: TextStyle(fontSize: 12, color: p.textMuted),
+              ),
             ),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Text(
-                  '${u.role == 'admin' ? 'Administrateur' : 'Utilisateur'} · '
-                  'Dernière connexion : ${u.lastLoginAt != null ? formatDate(u.lastLoginAt) : '—'}',
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ],
-            ),
-            Row(
-              children: [
-                const Expanded(child: Text('Email quotidien', style: TextStyle(fontSize: 13))),
-                Switch(
-                  value: u.receivesDailyEmail,
-                  onChanged: (v) => _patch(context, ref, {'receivesDailyEmail': v},
-                      success: 'Utilisateur mis à jour'),
-                ),
-              ],
+            Icon(Icons.mail_outline_rounded, size: 16, color: p.textMuted),
+            Transform.scale(
+              scale: 0.85,
+              child: Switch(
+                value: u.receivesDailyEmail,
+                onChanged: (v) =>
+                    _patch(context, ref, {'receivesDailyEmail': v}, success: 'Utilisateur mis à jour'),
+              ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  static String _initials(String name) {
+    final parts = name.split(RegExp(r'[\s._-]+')).where((s) => s.isNotEmpty).toList();
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) return parts.first.substring(0, parts.first.length.clamp(1, 2)).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
   }
 
   Future<void> _action(BuildContext context, WidgetRef ref, String action) async {

@@ -18,6 +18,15 @@ Connect the company VPN on the phone before opening the app. Cleartext HTTP is
 allowed (`usesCleartextTraffic` on Android, ATS exception on iOS) because the
 API is served over HTTP on the internal network.
 
+## Design
+
+Material 3 with light and dark themes (`lib/core/theme.dart`). Colors come from
+the `AppPalette` theme extension (`context.palette`), never from hard-coded
+values, so every screen follows the active mode. The mode follows the system by
+default and can be forced in *Plus › Apparence* (Système / Clair / Sombre).
+Typeface: Inter (bundled in `assets/fonts`, SIL OFL). PDF exports draw their
+charts natively and always stay light, whatever the app theme.
+
 ## Development
 
 ```bash
