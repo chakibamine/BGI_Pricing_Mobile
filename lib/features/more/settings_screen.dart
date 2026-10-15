@@ -1,0 +1,148 @@
+import 'package:dio/dio.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../core/settings.dart';
+import '../../core/theme.dart';
+import '../../core/widgets.dart';
+
+class SettingsScreen extends ConsumerStatefulWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  late final TextEditingController _url;
+  bool _testing = false;
+  String? _result;
+  bool _ok = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _url = TextEditingController(text: ref.read(apiUrlProvider));
+  }
+
+  @override
+  void dispose() {
+    _url.dispose();
+    super.dispose();
+  }
+
+  /// Any HTTP answer (even 401) means the API is reachable.
+  Future<void> _test() async {
+    setState(() {
+      _testing = true;
+      _result = null;
+    });
+    final url = _url.text.trim().replaceAll(RegExp(r'/+$'), '');
+    try {
+      final res = await Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 8),
+          receiveTimeout: const Duration(seconds: 8),
+          validateStatus: (_) => true,
+        ),
+      ).get<dynamic>('$url/auth/me');
+      _ok = true;
+      _result = 'Serveur joignable (HTTP ${res.statusCode})';
+    } catch (_) {
+      _ok = false;
+      _result =
+          'Serveur injoignable. Vérifiez la connexion VPN et l’adresse.';
+    } finally {
+      if (mounted) setState(() => _testing = false);
+    }
+  }
+
+  Future<void> _save() async {
+    final url = _url.text.trim();
+    if (!RegExp(r'^https?://').hasMatch(url)) {
+      showToast(context, 'L’adresse doit commencer par http:// ou https://',
+          error: true);
+      return;
+    }
+    await ref.read(apiUrlProvider.notifier).set(url);
+    if (mounted) showToast(context, 'Adresse du serveur enregistrée');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final current = ref.watch(apiUrlProvider);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Serveur')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Panel(
+            title: 'Adresse de l’API',
+            trailing: StatusChip(
+              envLabelFor(current),
+              color: current == defaultApiUrl
+                  ? AppColors.green
+                  : AppColors.amber,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextField(
+                  controller: _url,
+                  keyboardType: TextInputType.url,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'URL',
+                    hintText: 'http://10.10.2.10:3000',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    for (final e in apiUrlPresets.entries)
+                      ActionChip(
+                        label: Text(e.key),
+                        onPressed: () => setState(() => _url.text = e.value),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                if (_result != null) ...[
+                  InfoBanner(
+                    _result!,
+                    color: _ok ? AppColors.green : AppColors.red,
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _testing ? null : _test,
+                        child: Text(_testing ? 'Test…' : 'Tester'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: _save,
+                        child: const Text('Enregistrer'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'L’application accède à l’API de production via le VPN de '
+            'l’entreprise. Connectez le VPN avant d’ouvrir l’application.',
+            style: TextStyle(color: AppColors.muted, fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+}

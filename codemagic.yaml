@@ -1,0 +1,43 @@
+workflows:
+  ios-release:
+    name: iOS release (TestFlight)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: BGI App Store Connect
+    environment:
+      flutter: stable
+      xcode: latest
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: ma.bgipetroleum.bgiPricingMobile
+    scripts:
+      - name: Dependencies
+        script: flutter pub get
+      - name: Tests
+        script: flutter test test
+      - name: Code signing
+        script: xcode-project use-profiles
+      - name: Build IPA
+        script: flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
+    artifacts:
+      - build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+
+  android-release:
+    name: Android release APK
+    instance_type: linux_x2
+    environment:
+      flutter: stable
+    scripts:
+      - name: Dependencies
+        script: flutter pub get
+      - name: Tests
+        script: flutter test test
+      - name: Build APK
+        script: flutter build apk --release
+    artifacts:
+      - build/app/outputs/flutter-apk/app-release.apk
