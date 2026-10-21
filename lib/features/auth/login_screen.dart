@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/api_client.dart';
 import '../../core/auth.dart';
+import '../../core/biometric_login.dart';
 import '../../core/settings.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -22,6 +23,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _password = TextEditingController();
   bool _busy = false;
   bool _obscure = true;
+  bool _autoPrompted = false;
   String? _error;
 
   @override
@@ -49,8 +51,41 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
+  Future<void> _fingerprint() async {
+    if (_busy) return;
+    final saved = await ref.read(biometricLoginProvider).unlock();
+    if (saved == null || !mounted) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await ref.read(authProvider.notifier).login(saved.username, saved.password);
+    } on ApiException catch (e) {
+      if (e.status == 401 || e.status == 403) {
+        await ref.read(biometricLoginNotifierProvider.notifier).disable();
+        if (mounted) {
+          setState(() => _error = 'Empreinte désactivée. Le mot de passe a changé, reconnectez-vous.');
+        }
+      } else if (mounted) {
+        setState(() => _error = e.message);
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = errorMessage(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final biometricOn = ref.watch(biometricLoginNotifierProvider);
+    ref.listen<bool>(biometricLoginNotifierProvider, (prev, next) {
+      if (next && prev != true && !_autoPrompted) {
+        _autoPrompted = true;
+        _fingerprint();
+      }
+    });
     final p = context.palette;
     final notice = ref.watch(authProvider.select((s) => s.notice));
     final url = ref.watch(apiUrlProvider);
@@ -151,6 +186,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                         )
                                       : const Text('Se connecter'),
                                 ),
+                                if (biometricOn) ...[
+                                  const SizedBox(height: 10),
+                                  OutlinedButton.icon(
+                                    onPressed: _busy ? null : _fingerprint,
+                                    style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(50)),
+                                    icon: const Icon(Icons.fingerprint_rounded),
+                                    label: const Text('Connexion par empreinte'),
+                                  ),
+                                ],
                               ],
                             ),
                           ),

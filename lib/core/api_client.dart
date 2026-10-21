@@ -105,6 +105,7 @@ class ApiClient {
     String path, {
     Object? body,
     Map<String, dynamic>? query,
+    bool reportUnauthorized = true,
   }) =>
       _send(
         () => dio.post<dynamic>(
@@ -112,6 +113,7 @@ class ApiClient {
           data: body ?? <String, dynamic>{},
           queryParameters: _clean(query),
         ),
+        reportUnauthorized: reportUnauthorized,
       );
 
   Future<dynamic> patch(String path, {Object? body}) =>
@@ -163,20 +165,26 @@ class ApiClient {
     return out;
   }
 
-  Future<dynamic> _send(Future<Response<dynamic>> Function() call) async {
-    final res = await _raw(call);
+  Future<dynamic> _send(
+    Future<Response<dynamic>> Function() call, {
+    bool reportUnauthorized = true,
+  }) async {
+    final res = await _raw(call, reportUnauthorized: reportUnauthorized);
     return res.data;
   }
 
-  Future<Response<T>> _raw<T>(Future<Response<T>> Function() call) async {
+  Future<Response<T>> _raw<T>(
+    Future<Response<T>> Function() call, {
+    bool reportUnauthorized = true,
+  }) async {
     try {
       return await call();
     } on DioException catch (e) {
-      throw _toApiException(e);
+      throw _toApiException(e, reportUnauthorized: reportUnauthorized);
     }
   }
 
-  ApiException _toApiException(DioException e) {
+  ApiException _toApiException(DioException e, {bool reportUnauthorized = true}) {
     final res = e.response;
     if (res == null) {
       if (e.type == DioExceptionType.connectionTimeout ||
@@ -192,7 +200,7 @@ class ApiClient {
       return ApiException(e.message ?? 'Erreur réseau');
     }
     final status = res.statusCode;
-    if (status == 401) {
+    if (status == 401 && reportUnauthorized) {
       onUnauthorized();
       return ApiException('Session expirée, reconnectez-vous.', status: 401);
     }

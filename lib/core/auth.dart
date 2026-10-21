@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
 import 'api_client.dart';
+import 'biometric_login.dart';
 
 class AuthState {
   const AuthState({this.user, this.initializing = false, this.notice});
@@ -55,6 +56,7 @@ class AuthNotifier extends Notifier<AuthState> {
       body: {'username': username, 'password': password},
     ) as Json;
     await _tokens.write(res['accessToken'] as String);
+    await ref.read(biometricLoginProvider).refreshIfEnabled(username, password);
     final me = await _fetchMe();
     state = AuthState(
       user: me.copyWith(
@@ -64,11 +66,26 @@ class AuthNotifier extends Notifier<AuthState> {
     );
   }
 
+  /// Checks [password] without logging the current session out when it is wrong.
+  Future<void> confirmPassword(String password) async {
+    final username = state.user?.username;
+    if (username == null) {
+      throw ApiException('Session expirée, reconnectez-vous.', status: 401);
+    }
+    final res = await _api.post(
+      '/auth/login',
+      body: {'username': username, 'password': password},
+      reportUnauthorized: false,
+    ) as Json;
+    await _tokens.write(res['accessToken'] as String);
+  }
+
   Future<void> changePassword(String current, String next) async {
     await _api.post(
       '/auth/change-password',
       body: {'currentPassword': current, 'newPassword': next},
     );
+    await ref.read(biometricLoginProvider).updatePasswordIfEnabled(next);
     final user = state.user;
     if (user != null) {
       state = AuthState(user: user.copyWith(mustChangePassword: false));
