@@ -295,7 +295,7 @@ class _BkamPanelState extends ConsumerState<_BkamPanel> {
   bool _busy = false;
   ImportReport? _report;
 
-  Future<void> _fetch() async {
+  Future<void> _fetch({List<String>? onlyDates}) async {
     if (_from.isEmpty || _to.isEmpty) {
       showToast(context, 'Période requise', error: true);
       return;
@@ -312,22 +312,52 @@ class _BkamPanelState extends ConsumerState<_BkamPanel> {
       context,
       () async => await ref.read(apiClientProvider).post(
             '/import/exchange-rates/fetch-preview',
-            body: {'dateFrom': _from, 'dateTo': _to, 'source': _source},
+            body: {
+              'dateFrom': _from,
+              'dateTo': _to,
+              'source': _source,
+              if (onlyDates != null) 'dates': onlyDates,
+            },
           ) as Json,
     );
     if (!mounted) return;
     setState(() => _busy = false);
     if (res == null) return;
-    final rows = (res['rows'] as List).map((e) => BkamPreviewRow.fromJson(e as Json)).toList();
+    final fetched =
+        (res['rows'] as List).map((e) => BkamPreviewRow.fromJson(e as Json)).toList();
     setState(() {
-      _rows = rows;
-      _previewSource = _source;
-      _selected = {
-        for (final r in rows)
-          if (r.kind == 'new' || r.kind == 'changed') r.date,
-      };
+      if (onlyDates != null && _rows != null) {
+        final updated = {for (final r in fetched) r.date: r};
+        _rows = [for (final r in _rows!) updated[r.date] ?? r];
+        _selected = {
+          ..._selected,
+          for (final r in fetched)
+            if (r.kind == 'new' || r.kind == 'changed') r.date,
+        };
+      } else {
+        _rows = fetched;
+        _previewSource = _source;
+        _selected = {
+          for (final r in fetched)
+            if (r.kind == 'new' || r.kind == 'changed') r.date,
+        };
+      }
     });
-    if (rows.isEmpty) showToast(context, 'Aucun jour ouvré dans cette période', error: true);
+    if (onlyDates == null && fetched.isEmpty) {
+      showToast(context, 'Aucun jour ouvré dans cette période', error: true);
+    }
+  }
+
+  Future<void> _retryUnavailable() async {
+    final dates = [
+      for (final r in _rows ?? const <BkamPreviewRow>[])
+        if (r.kind == 'no_data') r.date,
+    ];
+    if (dates.isEmpty) {
+      showToast(context, 'Aucun jour indisponible à réessayer', error: true);
+      return;
+    }
+    await _fetch(onlyDates: dates);
   }
 
   Future<void> _save() async {
@@ -339,6 +369,9 @@ class _BkamPanelState extends ConsumerState<_BkamPanel> {
       showToast(context, 'Aucun taux sélectionné', error: true);
       return;
     }
+    final savedRates = {
+      for (final r in rows) r['date'] as String: r['rate'] as double,
+    };
     setState(() => _busy = true);
     final res = await runAction(
       context,
@@ -346,14 +379,27 @@ class _BkamPanelState extends ConsumerState<_BkamPanel> {
             '/import/exchange-rates/confirm',
             body: {'source': _previewSource, 'rows': rows},
           ) as Json),
-      success: 'Taux Bank Al-Maghrib enregistrés',
+      success: 'Taux enregistrés. Vous pouvez réessayer les indisponibles.',
     );
     if (!mounted) return;
     setState(() {
       _busy = false;
       if (res != null) {
         _report = res;
-        _rows = null;
+        // Keep Indisponible / erreurs so they can be retried after saving.
+        _rows = [
+          for (final r in _rows ?? const <BkamPreviewRow>[])
+            if (savedRates.containsKey(r.date))
+              BkamPreviewRow(
+                r.date,
+                savedRates[r.date],
+                'ok',
+                null,
+                savedRates[r.date],
+              )
+            else
+              r,
+        ];
         _selected = {};
       }
     });
@@ -376,8 +422,9 @@ class _BkamPanelState extends ConsumerState<_BkamPanel> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const InfoBanner(
-            'Maximum 100 jours calendaires. Les week-ends sont ignorés. '
-            'Rien n’est enregistré avant validation de l’aperçu.',
+            'Maximum 365 jours calendaires. Les week-ends sont ignorés. '
+            'Rien n’est enregistré avant validation de l’aperçu. '
+            'Une année entière peut prendre plusieurs minutes.',
             kind: BannerKind.info,
           ),
           Row(
@@ -461,6 +508,13 @@ class _BkamPanelState extends ConsumerState<_BkamPanel> {
                 ),
               ),
             const SizedBox(height: 8),
+            if ((counts['no_data'] ?? 0) > 0) ...[
+              OutlinedButton(
+                onPressed: _busy ? null : _retryUnavailable,
+                child: Text('Réessayer les indisponibles (${counts['no_data']})'),
+              ),
+              const SizedBox(height: 8),
+            ],
             Row(
               children: [
                 Expanded(

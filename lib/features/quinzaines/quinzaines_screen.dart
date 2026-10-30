@@ -87,7 +87,11 @@ class _QuinzainesScreenState extends ConsumerState<QuinzainesScreen> {
         ),
       ),
       children: [
-        _PeriodNavigator(value: key, onChanged: _select),
+        _PeriodNavigator(
+          value: key,
+          years: ref.watch(availableYearsProvider).value,
+          onChanged: _select,
+        ),
         const SizedBox(height: 14),
         AsyncView(
           value: detail,
@@ -500,10 +504,15 @@ class _QuinzainesScreenState extends ConsumerState<QuinzainesScreen> {
 
 /// "‹  Q1 · Octobre 2026  ›" with a picker sheet on tap.
 class _PeriodNavigator extends StatelessWidget {
-  const _PeriodNavigator({required this.value, required this.onChanged});
+  const _PeriodNavigator({
+    required this.value,
+    required this.onChanged,
+    this.years,
+  });
 
   final QuinzaineKey value;
   final ValueChanged<QuinzaineKey> onChanged;
+  final List<int>? years;
 
   QuinzaineKey _shift(int delta) {
     var index = value.year * 24 + (value.month - 1) * 2 + (value.period - 1) + delta;
@@ -569,6 +578,12 @@ class _PeriodNavigator extends StatelessWidget {
     var month = value.month;
     var period = value.period;
     final now = DateTime.now().year;
+    final yearOptions = {
+      ...?years,
+      now,
+      value.year,
+    }.toList()
+      ..sort((a, b) => b.compareTo(a));
     final ok = await showFormSheet<bool>(
       context,
       title: 'Choisir une quinzaine',
@@ -580,7 +595,7 @@ class _PeriodNavigator extends StatelessWidget {
               label: 'Année',
               icon: Icons.calendar_today_rounded,
               value: year,
-              items: {for (final y in {now - 1, now, now + 1, value.year}) y: '$y'},
+              items: {for (final y in yearOptions) y: '$y'},
               onChanged: (v) => setSheet(() => year = v),
             ),
             const SizedBox(height: 12),

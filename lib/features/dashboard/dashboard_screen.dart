@@ -114,7 +114,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             child: ProductSelector(value: _product, onChanged: (p) => _reset(() => _product = p)),
           ),
           const SizedBox(width: 8),
-          YearSelector(value: _year, onChanged: (y) => _reset(() => _year = y)),
+          YearSelector(
+            value: _year,
+            years: ref.watch(availableYearsProvider).value,
+            onChanged: (y) => _reset(() => _year = y),
+          ),
         ],
       ),
       children: [

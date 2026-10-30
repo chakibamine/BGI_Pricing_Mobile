@@ -27,6 +27,15 @@ class QuinzaineSelection extends Notifier<QuinzaineKey> {
 final quinzaineSelectionProvider =
     NotifierProvider<QuinzaineSelection, QuinzaineKey>(QuinzaineSelection.new);
 
+/// Quinzaine years that have both cotations and taux de change.
+final availableYearsProvider = FutureProvider.autoDispose<List<int>>((ref) async {
+  final res = await ref.watch(apiClientProvider).get('/pricing/years');
+  final years = (res as List).map((e) => (e as num).toInt()).toList();
+  if (years.isEmpty) years.add(DateTime.now().year);
+  years.sort((a, b) => b.compareTo(a));
+  return years;
+});
+
 final dashboardProvider = FutureProvider.autoDispose
     .family<DashboardData, ({Product product, int year})>((ref, k) async {
   final res = await ref.watch(apiClientProvider).get(
@@ -83,6 +92,7 @@ void invalidatePricing(WidgetRef ref) {
   ref.invalidate(quinzaineDetailProvider);
   ref.invalidate(quinzaineAttachmentsProvider);
   ref.invalidate(windowQuotesProvider);
+  ref.invalidate(availableYearsProvider);
 }
 
 String isoToday() => isoDate(DateTime.now());

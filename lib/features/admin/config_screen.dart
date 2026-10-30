@@ -20,10 +20,37 @@ class ConfigScreen extends ConsumerStatefulWidget {
 class _ConfigScreenState extends ConsumerState<ConfigScreen> {
   Product? _product;
   bool _history = false;
+  bool _busy = false;
 
   void _refresh() {
     ref.invalidate(productConfigsProvider);
     invalidatePricing(ref);
+  }
+
+  Future<void> _recalculateAll() async {
+    final ok = await confirmDialog(
+      context,
+      'Recalculer toutes les quinzaines (ouvertes et clôturées) pour Gasoil et SSP avec les paramètres actuels ?',
+      confirmLabel: 'Recalculer',
+    );
+    if (!ok || !mounted) return;
+    setState(() => _busy = true);
+    final res = await runAction(
+      context,
+      () => ref.read(apiClientProvider).post('/pricing/recalculate-all'),
+    );
+    if (mounted) setState(() => _busy = false);
+    if (res == null || !mounted) return;
+    final results = res as List;
+    final total = results.fold<int>(
+      0,
+      (s, r) => s + ((r as Map)['quinzaines'] as num? ?? 0).toInt(),
+    );
+    _refresh();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Recalcul terminé — $total quinzaine(s)')),
+    );
   }
 
   @override
@@ -31,8 +58,19 @@ class _ConfigScreenState extends ConsumerState<ConfigScreen> {
     final configs = ref.watch(productConfigsProvider(_product));
     return PageScaffold(
       title: 'Configurations',
+      actions: [
+        ActionMenu<String>(
+          busy: _busy,
+          onSelected: (v) {
+            if (v == 'recalc') _recalculateAll();
+          },
+          items: [
+            menuItem('recalc', Icons.refresh_rounded, 'Recalculer toutes les quinzaines'),
+          ],
+        ),
+      ],
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _create,
+        onPressed: _busy ? null : _create,
         icon: const Icon(Icons.add_rounded),
         label: const Text('Nouvelle config'),
       ),

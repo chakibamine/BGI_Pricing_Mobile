@@ -813,7 +813,7 @@ class DateField extends StatelessWidget {
   }
 }
 
-/// Compact year chip (previous / current / next year by default).
+/// Compact year chip fed by saved app years (falls back to current year).
 class YearSelector extends StatelessWidget {
   const YearSelector({super.key, required this.value, required this.onChanged, this.years});
 
@@ -825,7 +825,12 @@ class YearSelector extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     final now = DateTime.now().year;
-    final options = years ?? [now - 1, now, now + 1];
+    final options = {
+      ...?years,
+      now,
+      value,
+    }.toList()
+      ..sort((a, b) => b.compareTo(a));
     return PopupMenuButton<int>(
       initialValue: value,
       onSelected: onChanged,
