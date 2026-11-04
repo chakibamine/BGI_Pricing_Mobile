@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api_client.dart';
 import '../../core/auth.dart';
 import '../../core/charts.dart';
+import '../../core/export.dart';
 import '../../core/format.dart';
 import '../../core/quinzaine.dart';
 import '../../core/theme.dart';
@@ -61,15 +62,26 @@ class _TauxScreenState extends ConsumerState<TauxScreen> {
     return PageScaffold(
       title: 'Taux USD/MAD',
       actions: [
-        if (isAdmin)
-          ActionMenu<String>(
-            busy: _busy,
-            onSelected: (v) => v == 'fetch' ? _fetchToday() : _backfill(),
-            items: [
+        ActionMenu<String>(
+          busy: _busy,
+          onSelected: (v) {
+            switch (v) {
+              case 'export':
+                _exportExcel();
+              case 'fetch':
+                _fetchToday();
+              case 'backfill':
+                _backfill();
+            }
+          },
+          items: [
+            menuItem('export', Icons.grid_on_rounded, 'Export Excel'),
+            if (isAdmin) ...[
               menuItem('fetch', Icons.cloud_download_outlined, 'Récupérer Bank Al-Maghrib (BDT)'),
               menuItem('backfill', Icons.history_toggle_off_rounded, 'Backfill BDT'),
             ],
-          ),
+          ],
+        ),
       ],
       floatingActionButton: isAdmin
           ? FloatingActionButton.extended(
@@ -235,6 +247,30 @@ class _TauxScreenState extends ConsumerState<TauxScreen> {
     );
   }
 
+  Future<void> _exportExcel() async {
+    final body = await showFormSheet<Map<String, String>>(
+      context,
+      title: 'Export Excel taux de change',
+      builder: (_) => _ExportForm(from: _from, to: _to),
+    );
+    if (body == null || !mounted) return;
+    setState(() => _busy = true);
+    await runAction(context, () async {
+      final query = <String, dynamic>{
+        'dateFrom': body['dateFrom'],
+        'dateTo': body['dateTo'],
+        if (_source.isNotEmpty) 'source': _source,
+      };
+      final file = await ref.read(apiClientProvider).download(
+            '/exchange-rates/export',
+            query: query,
+            fallbackName: 'taux-de-change-${body['dateFrom']}-${body['dateTo']}.xlsx',
+          );
+      if (mounted) await saveAndOffer(context, file.bytes, file.filename);
+    });
+    if (mounted) setState(() => _busy = false);
+  }
+
   Future<void> _fetchToday() async {
     setState(() => _busy = true);
     final res = await runAction(
@@ -299,6 +335,52 @@ class _TauxScreenState extends ConsumerState<TauxScreen> {
       success: 'Taux supprimé',
     );
     _refreshData();
+  }
+}
+
+class _ExportForm extends StatefulWidget {
+  const _ExportForm({required this.from, required this.to});
+
+  final String from;
+  final String to;
+
+  @override
+  State<_ExportForm> createState() => _ExportFormState();
+}
+
+class _ExportFormState extends State<_ExportForm> {
+  late String _from = widget.from;
+  late String _to = widget.to;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const InfoBanner(
+          'Même format que l’import (Date | Devise | Taux). Choisissez la période.',
+          kind: BannerKind.info,
+        ),
+        DateField(label: 'Du', value: _from, clearable: false, onChanged: (v) => setState(() => _from = v)),
+        const SizedBox(height: 12),
+        DateField(label: 'Au', value: _to, clearable: false, onChanged: (v) => setState(() => _to = v)),
+        const SizedBox(height: 16),
+        FilledButton(
+          onPressed: () {
+            if (_from.isEmpty || _to.isEmpty) {
+              showToast(context, 'Choisissez la période Du / Au', error: true);
+              return;
+            }
+            if (_from.compareTo(_to) > 0) {
+              showToast(context, 'La date de début doit précéder la date de fin', error: true);
+              return;
+            }
+            Navigator.pop(context, {'dateFrom': _from, 'dateTo': _to});
+          },
+          child: const Text('Télécharger'),
+        ),
+      ],
+    );
   }
 }
 

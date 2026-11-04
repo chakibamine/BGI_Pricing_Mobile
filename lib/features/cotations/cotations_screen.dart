@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
 import '../../core/auth.dart';
+import '../../core/export.dart';
 import '../../core/format.dart';
 import '../../core/quinzaine.dart';
 import '../../core/theme.dart';
@@ -84,22 +85,26 @@ class _CotationsScreenState extends ConsumerState<CotationsScreen> {
     return PageScaffold(
       title: 'Cotations',
       actions: [
-        if (isAdmin)
-          ActionMenu<String>(
-            busy: _busy,
-            onSelected: (v) {
-              switch (v) {
-                case 'fetch':
-                  _fetchToday();
-                case 'backfill':
-                  _backfill();
-              }
-            },
-            items: [
+        ActionMenu<String>(
+          busy: _busy,
+          onSelected: (v) {
+            switch (v) {
+              case 'export':
+                _exportExcel();
+              case 'fetch':
+                _fetchToday();
+              case 'backfill':
+                _backfill();
+            }
+          },
+          items: [
+            menuItem('export', Icons.grid_on_rounded, 'Export Excel'),
+            if (isAdmin) ...[
               menuItem('fetch', Icons.cloud_download_outlined, 'Récupérer Platts (aujourd’hui)'),
               menuItem('backfill', Icons.history_toggle_off_rounded, 'Backfill Platts'),
             ],
-          ),
+          ],
+        ),
       ],
       floatingActionButton: isAdmin
           ? FloatingActionButton.extended(
@@ -416,6 +421,47 @@ class _CotationsScreenState extends ConsumerState<CotationsScreen> {
   }
 
 
+  ({String from, String to}) get _monthDefaults {
+    final now = DateTime.now();
+    return (
+      from: isoDate(DateTime(now.year, now.month, 1)),
+      to: isoDate(now),
+    );
+  }
+
+  Future<void> _exportExcel() async {
+    final defaults = _monthDefaults;
+    final body = await showFormSheet<Map<String, String>>(
+      context,
+      title: 'Export Excel cotations',
+      builder: (_) => _ExportForm(
+        product: _product.isEmpty ? 'GASOIL' : _product,
+        from: _from.isNotEmpty ? _from : defaults.from,
+        to: _to.isNotEmpty ? _to : defaults.to,
+      ),
+    );
+    if (body == null || !mounted) return;
+    setState(() => _busy = true);
+    await runAction(context, () async {
+      final query = <String, dynamic>{
+        'product': body['product'],
+        'dateFrom': body['dateFrom'],
+        'dateTo': body['dateTo'],
+        if (_status.isNotEmpty) 'status': _status,
+        if (_source.isNotEmpty) 'source': _source,
+        if (_correction.isNotEmpty) 'correction': _correction,
+      };
+      final file = await ref.read(apiClientProvider).download(
+            '/quotations/export',
+            query: query,
+            fallbackName:
+                'cotations-${body['product']!.toLowerCase()}-${body['dateFrom']}-${body['dateTo']}.xlsx',
+          );
+      if (mounted) await saveAndOffer(context, file.bytes, file.filename);
+    });
+    if (mounted) setState(() => _busy = false);
+  }
+
   Future<void> _fetchToday() async {
     setState(() => _busy = true);
     final res = await runAction(
@@ -621,6 +667,69 @@ class _CorrectFormState extends State<_CorrectForm> {
             Navigator.pop(context, {'newValue': v, 'reason': _reason.text.trim()});
           },
           child: const Text('Enregistrer'),
+        ),
+      ],
+    );
+  }
+}
+
+class _ExportForm extends StatefulWidget {
+  const _ExportForm({
+    required this.product,
+    required this.from,
+    required this.to,
+  });
+
+  final String product;
+  final String from;
+  final String to;
+
+  @override
+  State<_ExportForm> createState() => _ExportFormState();
+}
+
+class _ExportFormState extends State<_ExportForm> {
+  late String _product = widget.product;
+  late String _from = widget.from;
+  late String _to = widget.to;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const InfoBanner(
+          'Même format que l’import (Date | Valeur CIF NWE). Choisissez le produit et la période.',
+          kind: BannerKind.info,
+        ),
+        LabeledDropdown<String>(
+          label: 'Produit',
+          value: _product,
+          items: const {'GASOIL': 'Gasoil', 'SSP': 'SSP'},
+          onChanged: (v) => setState(() => _product = v),
+        ),
+        const SizedBox(height: 12),
+        DateField(label: 'Du', value: _from, clearable: false, onChanged: (v) => setState(() => _from = v)),
+        const SizedBox(height: 12),
+        DateField(label: 'Au', value: _to, clearable: false, onChanged: (v) => setState(() => _to = v)),
+        const SizedBox(height: 16),
+        FilledButton(
+          onPressed: () {
+            if (_from.isEmpty || _to.isEmpty) {
+              showToast(context, 'Choisissez la période Du / Au', error: true);
+              return;
+            }
+            if (_from.compareTo(_to) > 0) {
+              showToast(context, 'La date de début doit précéder la date de fin', error: true);
+              return;
+            }
+            Navigator.pop(context, {
+              'product': _product,
+              'dateFrom': _from,
+              'dateTo': _to,
+            });
+          },
+          child: const Text('Télécharger'),
         ),
       ],
     );

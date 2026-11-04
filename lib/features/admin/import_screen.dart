@@ -1,4 +1,6 @@
-﻿import 'package:file_picker/file_picker.dart';
+﻿import 'dart:async';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -288,12 +290,49 @@ class _BkamPanel extends ConsumerStatefulWidget {
 class _BkamPanelState extends ConsumerState<_BkamPanel> {
   String _from = '';
   String _to = '';
-  String _source = 'web';
+  String _source = 'api';
   String? _previewSource;
   List<BkamPreviewRow>? _rows;
   Set<String> _selected = {};
   bool _busy = false;
+  bool _fetching = false;
   ImportReport? _report;
+  ({int done, int total, String? currentDate})? _progress;
+  Timer? _progressTimer;
+
+  @override
+  void dispose() {
+    _progressTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startProgressPolling() {
+    _progressTimer?.cancel();
+    _progress = null;
+    _progressTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) async {
+      try {
+        final res = await ref.read(apiClientProvider).get(
+              '/import/exchange-rates/fetch-preview/progress',
+            ) as Json;
+        if (!mounted) return;
+        setState(() {
+          _progress = (
+            done: (res['done'] as num?)?.toInt() ?? 0,
+            total: (res['total'] as num?)?.toInt() ?? 0,
+            currentDate: res['currentDate'] as String?,
+          );
+        });
+      } catch (_) {
+        // Progress is best-effort while the long fetch runs.
+      }
+    });
+  }
+
+  void _stopProgressPolling() {
+    _progressTimer?.cancel();
+    _progressTimer = null;
+    if (mounted) setState(() => _progress = null);
+  }
 
   Future<void> _fetch({List<String>? onlyDates}) async {
     if (_from.isEmpty || _to.isEmpty) {
@@ -306,8 +345,10 @@ class _BkamPanelState extends ConsumerState<_BkamPanel> {
     }
     setState(() {
       _busy = true;
+      _fetching = true;
       _report = null;
     });
+    _startProgressPolling();
     final res = await runAction(
       context,
       () async => await ref.read(apiClientProvider).post(
@@ -316,12 +357,16 @@ class _BkamPanelState extends ConsumerState<_BkamPanel> {
               'dateFrom': _from,
               'dateTo': _to,
               'source': _source,
-              if (onlyDates != null) 'dates': onlyDates,
+              'dates': ?onlyDates,
             },
           ) as Json,
     );
+    _stopProgressPolling();
     if (!mounted) return;
-    setState(() => _busy = false);
+    setState(() {
+      _busy = false;
+      _fetching = false;
+    });
     if (res == null) return;
     final fetched =
         (res['rows'] as List).map((e) => BkamPreviewRow.fromJson(e as Json)).toList();
@@ -345,6 +390,20 @@ class _BkamPanelState extends ConsumerState<_BkamPanel> {
     });
     if (onlyDates == null && fetched.isEmpty) {
       showToast(context, 'Aucun jour ouvré dans cette période', error: true);
+    } else if (onlyDates != null) {
+      final recovered = fetched.where((r) => r.status == 'ok').length;
+      final stillMissing =
+          fetched.where((r) => r.status == 'no_data' || r.rate == null).length;
+      if (recovered > 0) {
+        showToast(
+          context,
+          '$recovered taux récupéré(s)${stillMissing > 0 ? ', $stillMissing encore indisponible(s)' : ''}',
+        );
+      } else if (stillMissing > 0) {
+        showToast(context, 'Toujours indisponibles', error: true);
+      } else {
+        showToast(context, 'Nouvelle tentative terminée');
+      }
     }
   }
 
@@ -403,6 +462,7 @@ class _BkamPanelState extends ConsumerState<_BkamPanel> {
         _selected = {};
       }
     });
+    if (res != null) invalidatePricing(ref);
   }
 
   @override
@@ -456,8 +516,30 @@ class _BkamPanelState extends ConsumerState<_BkamPanel> {
           ),
           FilledButton(
             onPressed: _busy ? null : _fetch,
-            child: Text(_busy && rows == null ? 'Récupération…' : 'Récupérer'),
+            child: Text(
+              _fetching
+                  ? (_progress != null && _progress!.total > 0
+                      ? 'Récupération… ${_progress!.done}/${_progress!.total}'
+                      : 'Récupération…')
+                  : 'Récupérer',
+            ),
           ),
+          if (_fetching) ...[
+            const SizedBox(height: 8),
+            Text(
+              _progress != null && _progress!.total > 0
+                  ? 'Jour ${_progress!.done} sur ${_progress!.total}'
+                      '${_progress!.currentDate != null ? ' (${formatDate(_progress!.currentDate)})' : ''}'
+                  : 'Récupération en cours…',
+              style: TextStyle(fontSize: 12.5, color: context.palette.textMuted),
+            ),
+            if (_progress != null && _progress!.total > 0) ...[
+              const SizedBox(height: 6),
+              LinearProgressIndicator(
+                value: _progress!.done / _progress!.total,
+              ),
+            ],
+          ],
           if (rows != null && rows.isNotEmpty) ...[
             const SizedBox(height: 12),
             Text(
