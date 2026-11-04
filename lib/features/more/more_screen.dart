@@ -77,6 +77,16 @@ class MoreScreen extends ConsumerWidget {
             ],
           ),
         ),
+        const SectionLabel('Suivi'),
+        _Group(children: [
+          _Tile(
+            Icons.local_shipping_outlined,
+            p.info,
+            'Importations',
+            'Négociation et deal recap',
+            () => context.go('/more/importations'),
+          ),
+        ]),
         if (isAdmin) ...[
           const SectionLabel('Administration'),
           _Group(children: [

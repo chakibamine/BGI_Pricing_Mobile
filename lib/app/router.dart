@@ -16,6 +16,8 @@ import '../features/more/more_screen.dart';
 import '../features/more/settings_screen.dart';
 import '../features/quinzaines/quinzaines_screen.dart';
 import '../features/taux/taux_screen.dart';
+import '../features/importations/importations_screen.dart';
+import '../features/importations/importation_detail_screen.dart';
 import 'shell.dart';
 
 const _adminPaths = ['/more/config', '/more/import', '/more/users', '/more/audit'];
@@ -90,6 +92,16 @@ final routerProvider = Provider<GoRouter>((ref) {
                 GoRoute(
                   path: 'config',
                   builder: (_, _) => const ConfigScreen(),
+                ),
+                GoRoute(
+                  path: 'importations',
+                  builder: (_, _) => const ImportationsScreen(),
+                ),
+                GoRoute(
+                  path: 'importations/:id',
+                  builder: (_, state) => ImportationDetailScreen(
+                    id: int.parse(state.pathParameters['id']!),
+                  ),
                 ),
                 GoRoute(
                   path: 'import',

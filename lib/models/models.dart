@@ -438,3 +438,73 @@ class UserRow {
   String? get lastLoginAt => _j['lastLoginAt'] as String?;
   String? get temporaryPassword => _j['temporaryPassword'] as String?;
 }
+
+class ImportationListItem {
+  ImportationListItem(this._j);
+  final Json _j;
+
+  factory ImportationListItem.fromJson(Json j) => ImportationListItem(j);
+
+  int get id => _j['id'] as int;
+  String get reference => _str(_j['reference']);
+  String get status => _str(_j['status']);
+  String? get productCode => _j['productCode'] as String?;
+  String? get productLabel => _j['productLabel'] as String?;
+  String? get prospectName => _j['prospectName'] as String?;
+  String? get supplierName => _j['supplierName'] as String?;
+  double? get quantityMt => toDouble(_j['quantityMt']);
+  String? get destination => _j['destination'] as String?;
+  String? get eta => isoDay(_j['eta']);
+  int get displayYear => (_j['displayYear'] as num).toInt();
+  bool get sealed => (_j['latestRecap'] as Json?)?['sealed'] == true;
+
+  String get statusLabel => switch (status) {
+        'confirmed' => 'Confirmée',
+        _ => 'En négociation',
+      };
+}
+
+class DealRecapPayload {
+  DealRecapPayload(this.data);
+  final Map<String, dynamic> data;
+
+  factory DealRecapPayload.fromJson(Json j) =>
+      DealRecapPayload(Map<String, dynamic>.from(j));
+
+  Map<String, dynamic> toJson() => Map<String, dynamic>.from(data);
+
+  String getStr(String key) => _str(data[key]);
+  void setStr(String key, String value) => data[key] = value;
+}
+
+class DealRecapVersion {
+  DealRecapVersion(this._j);
+  final Json _j;
+
+  factory DealRecapVersion.fromJson(Json j) => DealRecapVersion(j);
+
+  int get id => _j['id'] as int;
+  int get version => (_j['version'] as num).toInt();
+  bool get sealed => _j['sealed'] == true;
+  String? get sealedAt => _j['sealedAt'] as String?;
+  String? get sealProofNote => _j['sealProofNote'] as String?;
+  String? get sealProofFileName => _j['sealProofFileName'] as String?;
+  DealRecapPayload get payload =>
+      DealRecapPayload.fromJson((_j['payload'] as Json?) ?? {});
+}
+
+class ImportationDetail {
+  ImportationDetail(this._j);
+  final Json _j;
+
+  factory ImportationDetail.fromJson(Json j) => ImportationDetail(j);
+
+  ImportationListItem get list => ImportationListItem.fromJson(_j);
+  String? get negotiationNotes => _j['negotiationNotes'] as String?;
+  String? get conditionsNotes => _j['conditionsNotes'] as String?;
+  List<DealRecapVersion> get dealRecaps => _list(
+        _j['dealRecaps'],
+        (e) => DealRecapVersion.fromJson(e),
+      );
+  DealRecapVersion? get latestRecap => dealRecaps.isEmpty ? null : dealRecaps.first;
+}
